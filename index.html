@@ -145,42 +145,84 @@ const SYNC_URL="https://ironlog-api.vercel.app";
 let syncTimer=null;
 let syncInFlight=false;
 
+// ─── Offline Sync Queue (IndexedDB) ───
+const SyncQueue={
+  _open:()=>new Promise((resolve,reject)=>{
+    const req=indexedDB.open("ironlog-sync-queue",1);
+    req.onupgradeneeded=(e)=>{const db=e.target.result;if(!db.objectStoreNames.contains("queue"))db.createObjectStore("queue",{keyPath:"id",autoIncrement:true});};
+    req.onsuccess=(e)=>resolve(e.target.result);
+    req.onerror=(e)=>reject(e.target.error);
+  }),
+  add:async(url,body)=>{
+    try{const db=await SyncQueue._open();const tx=db.transaction("queue","readwrite");
+    tx.objectStore("queue").add({url,body,timestamp:new Date().toISOString()});
+    LS.set("ft-pending-sync",(parseInt(LS.get("ft-pending-sync"))||0)+1);
+    // Request background sync if available
+    if("serviceWorker" in navigator&&"SyncManager" in window){
+      const reg=await navigator.serviceWorker.ready;
+      await reg.sync.register("ironlog-sync").catch(()=>{});
+    }}catch(e){}
+  },
+  count:async()=>{
+    try{const db=await SyncQueue._open();return new Promise(r=>{
+      const tx=db.transaction("queue","readonly");const c=tx.objectStore("queue").count();
+      c.onsuccess=()=>r(c.result);c.onerror=()=>r(0);
+    });}catch(e){return 0;}
+  },
+  clear:async()=>{
+    try{const db=await SyncQueue._open();const tx=db.transaction("queue","readwrite");
+    tx.objectStore("queue").clear();LS.set("ft-pending-sync",0);}catch(e){}
+  },
+  processAll:async()=>{
+    try{const db=await SyncQueue._open();const tx=db.transaction("queue","readonly");
+    const getAll=tx.objectStore("queue").getAll();
+    return new Promise(resolve=>{
+      getAll.onsuccess=async()=>{
+        const items=getAll.result||[];let synced=0;
+        for(const item of items){
+          try{const res=await fetch(item.url,{method:"POST",headers:{"Content-Type":"application/json"},body:item.body});
+          if(res.ok){const delTx=db.transaction("queue","readwrite");delTx.objectStore("queue").delete(item.id);synced++;}}catch(e){}
+        }
+        LS.set("ft-pending-sync",Math.max(0,items.length-synced));
+        resolve({synced,remaining:items.length-synced});
+      };
+      getAll.onerror=()=>resolve({synced:0,remaining:0});
+    });}catch(e){return{synced:0,remaining:0};}
+  }
+};
+
 const CloudSync={
-  // Push all data to server (debounced, silent)
+  // Push all data to server (debounced, silent) — queues on failure
   push:async(state)=>{
     if(syncInFlight)return;
     const email=state.profile?.email;
-    if(!email)return; // not onboarded yet
+    if(!email)return;
     syncInFlight=true;
+    const payload=JSON.stringify({
+      email,
+      deviceId:LS.get("ft-device-id")||"unknown",
+      workouts:(state.syncPrefs||{}).workouts!==false?state.workouts||[]:[],
+      nutrition:(state.syncPrefs||{}).nutrition!==false?state.nutrition||[]:[],
+      body:(state.syncPrefs||{}).body!==false?state.body||[]:[],
+      photos:(state.syncPrefs||{}).photos!==false?(state.photos||[]).filter(p=>!p.data||p.data.length<500000):[],
+      checkins:(state.syncPrefs||{}).checkins!==false?state.checkins||[]:[],
+      milestones:(state.syncPrefs||{}).milestones!==false?state.milestones||[]:[],
+      settings:{goals:state.goals,schedule:state.schedule,exercises:state.exercises,units:state.units},
+    });
     try{
-      await fetch(`${SYNC_URL}/api/sync/push`,{
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({
-          email,
-          deviceId:LS.get("ft-device-id")||"unknown",
-          workouts:state.workouts||[],
-          nutrition:state.nutrition||[],
-          body:state.body||[],
-          photos:(state.photos||[]).filter(p=>!p.data||p.data.length<500000),
-          checkins:state.checkins||[],
-          milestones:state.milestones||[],
-          settings:{
-            goals:state.goals,
-            schedule:state.schedule,
-            exercises:state.exercises,
-            units:state.units,
-          },
-        }),
-      });
+      const res=await fetch(`${SYNC_URL}/api/sync/push`,{method:"POST",headers:{"Content-Type":"application/json"},body:payload});
+      if(!res.ok)throw new Error("Push failed");
       LS.set("ft-last-sync",new Date().toISOString());
+      LS.set("ft-pending-sync",0);
+      // Also flush any queued items on successful connection
+      SyncQueue.processAll();
     }catch(e){
-      // Silent fail — local data is always the source of truth
+      // Queue for background sync
+      await SyncQueue.add(`${SYNC_URL}/api/sync/push`,payload);
     }
     syncInFlight=false;
   },
 
-  // Debounced push — waits 3 seconds after last change before syncing
   debouncedPush:(state)=>{
     if(syncTimer)clearTimeout(syncTimer);
     syncTimer=setTimeout(()=>CloudSync.push(state),3000);
@@ -506,6 +548,9 @@ const defaultSchedule = {
 const init={tab:"home",workouts:[],nutrition:[],body:[],exercises:defaultExercises,
   goals:{cal:2400,protein:180,carbs:250,fat:70,goalWeight:175},schedule:defaultSchedule,
   range:30,loaded:false,modal:null,units:"lbs",onboarded:false,photos:[],checkins:[],milestones:[],
+  phases:[],injuries:[],
+  syncPrefs:{workouts:true,nutrition:true,body:true,photos:true,checkins:true,milestones:true},
+  a11y:{largeText:false,highContrast:false,reduceMotion:false},
   profile:{firstName:"",lastName:"",nickname:"",email:"",dob:"",sex:"",state:"",
     height:"",fitnessLevel:"",activityLevel:"",weeklyAvailability:""}};
 
@@ -535,6 +580,10 @@ function reducer(s,a){
     case "SET_PROFILE": return{...s,profile:{...(s.profile||{}),...a.profile}};
     case "ADD_CHECKIN": return{...s,checkins:[a.c,...(s.checkins||[]).filter(c=>c.date!==a.c.date)]};
     case "SET_MILESTONES": return{...s,milestones:a.milestones||[]};
+    case "SET_PHASES": return{...s,phases:a.phases||[]};
+    case "SET_INJURIES": return{...s,injuries:a.injuries||[]};
+    case "SET_SYNC_PREFS": return{...s,syncPrefs:{...(s.syncPrefs||{}),...a.prefs}};
+    case "SET_A11Y": return{...s,a11y:{...(s.a11y||{}),...a.a11y}};
     case "ADD_PHOTO": return{...s,photos:[a.photo,...s.photos]};
     case "DEL_PHOTO": return{...s,photos:s.photos.filter(p=>p.id!==a.id)};
     case "CLEAR_ALL": return{...init,exercises:defaultExercises,loaded:true,onboarded:true,units:s.units,profile:s.profile};
@@ -2745,6 +2794,84 @@ function SettingsTab({s,d}){
         </div>
       </Row>
 
+      {/* Privacy Controls */}
+      <Row id="privacy" icon={Icons.target({size:16,color:"#22d3ee"})} label="Privacy & Sync Controls"
+        desc="Choose what syncs to cloud">
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          {[{k:"workouts",l:"Workouts"},{k:"nutrition",l:"Nutrition"},{k:"body",l:"Body Metrics"},
+            {k:"photos",l:"Photos"},{k:"checkins",l:"Check-ins"},{k:"milestones",l:"Goals"}
+          ].map(item=>(
+            <div key={item.k} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 0"}}>
+              <span style={{fontSize:12,color:V.text}}>{item.l}</span>
+              <button onClick={()=>d({type:"SET_SYNC_PREFS",prefs:{[item.k]:!(s.syncPrefs||{})[item.k]}})} style={{
+                width:42,height:24,borderRadius:12,border:"none",cursor:"pointer",
+                background:(s.syncPrefs||{})[item.k]!==false?V.accent:"rgba(255,255,255,0.1)",
+                position:"relative",transition:"background .2s"}}>
+                <div style={{width:18,height:18,borderRadius:9,background:"#fff",position:"absolute",top:3,
+                  left:(s.syncPrefs||{})[item.k]!==false?21:3,transition:"left .2s"}}/>
+              </button>
+            </div>
+          ))}
+          <div style={{padding:"10px 12px",background:"rgba(255,107,107,0.04)",borderRadius:8,border:`1px solid rgba(255,107,107,0.1)`,marginTop:4}}>
+            <div style={{fontSize:11,color:V.danger,fontWeight:600,marginBottom:4}}>Delete Cloud Data</div>
+            <div style={{fontSize:10,color:V.text3,marginBottom:8}}>This removes all your data from our servers. Local data stays.</div>
+            <a href={`mailto:support@ironlog.space?subject=Delete%20Cloud%20Data&body=Please%20delete%20all%20cloud%20data%20for%20${s.profile?.email||"my account"}`}
+              style={{fontSize:10,color:V.danger,fontWeight:600,textDecoration:"underline"}}>Request Cloud Deletion</a>
+          </div>
+        </div>
+      </Row>
+
+      {/* Accessibility */}
+      <Row id="a11y" icon={Icons.activity({size:16,color:V.purple})} label="Accessibility"
+        desc="Large text, high contrast, reduced motion">
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          {[{k:"largeText",l:"Large Text Mode",d:"Increases font sizes throughout the app"},
+            {k:"highContrast",l:"High Contrast",d:"Stronger text/background contrast"},
+            {k:"reduceMotion",l:"Reduce Motion",d:"Disables animations and transitions"}
+          ].map(item=>(
+            <div key={item.k} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"6px 0"}}>
+              <div>
+                <div style={{fontSize:12,color:V.text,fontWeight:600}}>{item.l}</div>
+                <div style={{fontSize:10,color:V.text3}}>{item.d}</div>
+              </div>
+              <button onClick={()=>d({type:"SET_A11Y",a11y:{[item.k]:!(s.a11y||{})[item.k]}})} style={{
+                width:42,height:24,borderRadius:12,border:"none",cursor:"pointer",
+                background:(s.a11y||{})[item.k]?V.accent:"rgba(255,255,255,0.1)",
+                position:"relative",transition:"background .2s"}}>
+                <div style={{width:18,height:18,borderRadius:9,background:"#fff",position:"absolute",top:3,
+                  left:(s.a11y||{})[item.k]?21:3,transition:"left .2s"}}/>
+              </button>
+            </div>
+          ))}
+        </div>
+      </Row>
+
+      {/* Reminders */}
+      <Row id="reminders" icon={Icons.calendar({size:16,color:"#34d399"})} label="Reminders"
+        desc="Notifications for workouts, hydration, check-ins">
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          <Btn full onClick={async()=>{
+            if("Notification" in window){
+              const perm=await Notification.requestPermission();
+              if(perm==="granted"){
+                new Notification("IRONLOG",{body:"Reminders enabled! You'll get nudges on workout days.",icon:"./icon.svg"});
+                LS.set("ft-reminders",true);
+              }
+            }else{alert("Notifications not supported in this browser.");}
+          }}>{Icons.activity({size:14,color:V.bg})} Enable Notifications</Btn>
+          <div style={{fontSize:10,color:V.text3,lineHeight:1.5}}>
+            When enabled, IRONLOG will send reminders on scheduled workout days, daily check-in prompts, and hydration nudges. 
+            Notifications work best on Android. iOS PWA notification support is limited.
+          </div>
+          {LS.get("ft-reminders")&&(
+            <div style={{display:"flex",alignItems:"center",gap:6}}>
+              {Icons.check({size:12,color:V.accent})}
+              <span style={{fontSize:11,color:V.accent,fontWeight:600}}>Notifications enabled</span>
+            </div>
+          )}
+        </div>
+      </Row>
+
       {/* Legal — expandable */}
       <Row id="legal" icon={Icons.chevRight({size:16,color:V.text3})} label="Legal & Privacy"
         desc="Terms, Privacy Policy, Data Rights">
@@ -3353,7 +3480,7 @@ function DataManager({s,d}){
     const data={
       _ironlog:{version:CURRENT_VERSION,exported:new Date().toISOString(),platform:"IRONLOG v3"},
       workouts:s.workouts,nutrition:s.nutrition,body:s.body,exercises:s.exercises,
-      goals:s.goals,schedule:s.schedule,units:s.units,photos:s.photos||[],profile:s.profile||{},checkins:s.checkins||[],milestones:s.milestones||[]
+      goals:s.goals,schedule:s.schedule,units:s.units,photos:s.photos||[],profile:s.profile||{},checkins:s.checkins||[],milestones:s.milestones||[],phases:s.phases||[],injuries:s.injuries||[]
     };
     const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
     const url=URL.createObjectURL(blob);
@@ -4256,6 +4383,33 @@ function AdaptiveCoach({s}){
 function SyncStatus({s}){
   const lastSync=LS.get("ft-last-sync");
   const email=s.profile?.email;
+  const [pending,setPending]=useState(parseInt(LS.get("ft-pending-sync"))||0);
+  const [retrying,setRetrying]=useState(false);
+
+  // Listen for sync completion from SW
+  useEffect(()=>{
+    const handler=(e)=>{
+      if(e.data?.type==="SYNC_COMPLETE"){setPending(e.data.remaining||0);LS.set("ft-pending-sync",e.data.remaining||0);}
+      if(e.data?.type==="QUEUE_COUNT"){setPending(e.data.count||0);}
+    };
+    navigator.serviceWorker?.addEventListener("message",handler);
+    // Ask SW for current queue count
+    navigator.serviceWorker?.controller?.postMessage({type:"GET_QUEUE_COUNT"});
+    return()=>navigator.serviceWorker?.removeEventListener("message",handler);
+  },[]);
+
+  // Also update from localStorage on interval
+  useEffect(()=>{
+    const iv=setInterval(()=>setPending(parseInt(LS.get("ft-pending-sync"))||0),5000);
+    return()=>clearInterval(iv);
+  },[]);
+
+  const retry=async()=>{
+    setRetrying(true);
+    const result=await SyncQueue.processAll();
+    setPending(result.remaining);
+    setRetrying(false);
+  };
 
   const fmtAgo=(iso)=>{
     if(!iso)return"Never";
@@ -4269,12 +4423,21 @@ function SyncStatus({s}){
   if(!email)return null;
 
   return(
-    <div style={{display:"flex",alignItems:"center",gap:6,padding:"6px 12px",
-      background:"rgba(255,255,255,0.02)",borderRadius:8,border:`1px solid ${V.cardBorder}`}}>
-      <div style={{width:6,height:6,borderRadius:3,background:lastSync?V.accent:"rgba(255,255,255,0.15)"}}/>
-      <span style={{fontSize:9,color:V.text3}}>
-        {lastSync?`Synced ${fmtAgo(lastSync)}`:"Not synced yet"}
-      </span>
+    <div style={{display:"flex",alignItems:"center",gap:6}}>
+      <div style={{display:"flex",alignItems:"center",gap:4,padding:"4px 8px",
+        background:pending>0?"rgba(255,159,67,0.06)":"rgba(255,255,255,0.02)",
+        borderRadius:6,border:`1px solid ${pending>0?"rgba(255,159,67,0.15)":V.cardBorder}`}}>
+        <div style={{width:5,height:5,borderRadius:3,background:pending>0?V.warn:lastSync?V.accent:"rgba(255,255,255,0.15)"}}/>
+        <span style={{fontSize:8,color:pending>0?V.warn:V.text3,fontWeight:600}}>
+          {pending>0?`${pending} pending`:lastSync?`${fmtAgo(lastSync)}`:"No sync"}
+        </span>
+      </div>
+      {pending>0&&(
+        <button onClick={retry} disabled={retrying} style={{padding:"3px 6px",borderRadius:4,background:`${V.warn}12`,
+          border:"none",cursor:"pointer",fontSize:7,color:V.warn,fontWeight:700}}>
+          {retrying?"…":"Retry"}
+        </button>
+      )}
     </div>
   );
 }
@@ -4498,6 +4661,567 @@ function FormCheckTab({s,d}){
   );
 }
 
+// ─── #1 Data Integrity Safeguards ───
+function useDataGuard(s){
+  return useMemo(()=>{
+    const warnings=[];
+    // Body weight outliers
+    const bw=s.body.filter(b=>b.weight>0).sort((a,b)=>a.date.localeCompare(b.date));
+    for(let i=1;i<bw.length;i++){
+      const diff=Math.abs(bw[i].weight-bw[i-1].weight);
+      if(diff>15){warnings.push({type:"body",severity:"high",msg:`Weight jump: ${bw[i-1].weight}→${bw[i].weight} (${diff>0?"+":""}${(bw[i].weight-bw[i-1].weight).toFixed(1)} ${s.units}) on ${bw[i].date}`,date:bw[i].date,id:bw[i].id});}
+      else if(diff>8){warnings.push({type:"body",severity:"med",msg:`Unusual weight change: ${diff.toFixed(1)} ${s.units} on ${bw[i].date}`,date:bw[i].date,id:bw[i].id});}
+    }
+    // Workout weight outliers per exercise
+    const exMap={};
+    s.workouts.forEach(w=>w.exercises.forEach(ex=>{
+      ex.sets.forEach(st=>{if(st.weight>0){if(!exMap[ex.exerciseId])exMap[ex.exerciseId]=[];exMap[ex.exerciseId].push({w:st.weight,date:w.date,id:w.id});}});
+    }));
+    Object.entries(exMap).forEach(([eid,entries])=>{
+      if(entries.length<3)return;
+      const avg=entries.reduce((s2,e)=>s2+e.w,0)/entries.length;
+      const std=Math.sqrt(entries.reduce((s2,e)=>s2+Math.pow(e.w-avg,2),0)/entries.length);
+      entries.forEach(e=>{
+        if(Math.abs(e.w-avg)>std*2.5&&std>10){
+          const name=s.exercises.find(x=>x.id===eid)?.name||eid;
+          warnings.push({type:"workout",severity:"med",msg:`${name}: ${e.w} ${s.units} is unusual (avg: ${Math.round(avg)}) on ${e.date}`,date:e.date,id:e.id});
+        }
+      });
+    });
+    // Duplicate workout detection (same date, very similar exercises)
+    const dateMap={};
+    s.workouts.forEach(w=>{if(!dateMap[w.date])dateMap[w.date]=[];dateMap[w.date].push(w);});
+    Object.entries(dateMap).forEach(([date,ws])=>{
+      if(ws.length>1){
+        for(let i=1;i<ws.length;i++){
+          const exA=ws[0].exercises.map(e=>e.exerciseId).sort().join(",");
+          const exB=ws[i].exercises.map(e=>e.exerciseId).sort().join(",");
+          if(exA===exB)warnings.push({type:"duplicate",severity:"high",msg:`Duplicate workout on ${date} (same exercises)`,date,id:ws[i].id});
+          else warnings.push({type:"duplicate",severity:"low",msg:`Multiple workouts on ${date}`,date,id:ws[i].id});
+        }
+      }
+    });
+    // Calorie sanity
+    s.nutrition.forEach(n=>{
+      if(n.cal>6000)warnings.push({type:"nutrition",severity:"med",msg:`${n.cal} cal on ${n.date} seems high`,date:n.date,id:n.id});
+      if(n.cal>0&&n.cal<500)warnings.push({type:"nutrition",severity:"low",msg:`Only ${n.cal} cal on ${n.date}`,date:n.date,id:n.id});
+      if(n.protein>400)warnings.push({type:"nutrition",severity:"med",msg:`${n.protein}g protein on ${n.date} seems high`,date:n.date,id:n.id});
+    });
+    return warnings.sort((a,b)=>{const sev={high:0,med:1,low:2};return(sev[a.severity]||2)-(sev[b.severity]||2);});
+  },[s.workouts,s.body,s.nutrition,s.exercises,s.units]);
+}
+
+function DataGuardTab({s,d}){
+  const warnings=useDataGuard(s);
+  const sevColor={high:V.danger,med:V.warn,low:V.text3};
+  const sevLabel={high:"Critical",med:"Warning",low:"Info"};
+
+  const deleteItem=(w)=>{
+    if(w.type==="workout"||w.type==="duplicate")d({type:"DEL_W",id:w.id});
+    else if(w.type==="body")d({type:"DEL_B",id:w.id});
+    else if(w.type==="nutrition")d({type:"DEL_N",id:w.id});
+  };
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",gap:12}}>
+      <div style={{fontSize:16,fontWeight:800,color:V.text}}>Data Integrity</div>
+      <div style={{fontSize:12,color:V.text3}}>Auto-scanned for outliers, duplicates, and suspicious values</div>
+
+      {warnings.length===0?(
+        <Card style={{padding:20,textAlign:"center"}}>
+          <div style={{fontSize:28,marginBottom:8}}>✅</div>
+          <div style={{fontSize:14,fontWeight:700,color:V.accent}}>All clear</div>
+          <div style={{fontSize:11,color:V.text3,marginTop:4}}>No data issues detected across {s.workouts.length} workouts, {s.nutrition.length} nutrition logs, and {s.body.length} measurements</div>
+        </Card>
+      ):(
+        <div>
+          <div style={{fontSize:11,color:V.text3,marginBottom:8}}>{warnings.length} issue{warnings.length>1?"s":""} found</div>
+          {warnings.map((w,i)=>(
+            <Card key={i} style={{padding:12,marginBottom:6}}>
+              <div style={{display:"flex",alignItems:"flex-start",gap:10}}>
+                <div style={{width:8,height:8,borderRadius:4,background:sevColor[w.severity],marginTop:4,flexShrink:0}}/>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:9,fontWeight:700,color:sevColor[w.severity],textTransform:"uppercase",marginBottom:2}}>{sevLabel[w.severity]}</div>
+                  <div style={{fontSize:12,color:V.text,lineHeight:1.4}}>{w.msg}</div>
+                </div>
+                {(w.type==="duplicate")&&(
+                  <button onClick={()=>deleteItem(w)} style={{padding:"4px 8px",borderRadius:6,
+                    background:"rgba(255,107,107,0.08)",border:"none",cursor:"pointer",fontSize:9,color:V.danger,fontWeight:700}}>Delete</button>
+                )}
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── #2 Phase/Cycle Tracking ───
+function PhaseTracker({s,d}){
+  const [showAdd,setShowAdd]=useState(false);
+  const [form,setForm]=useState({type:"cut",start:today(),end:"",notes:""});
+  const phases=s.phases||[];
+
+  const phaseTypes=[
+    {id:"cut",label:"Cut",color:V.danger,icon:"🔥"},
+    {id:"bulk",label:"Bulk",color:V.accent,icon:"💪"},
+    {id:"maintain",label:"Maintain",color:V.accent2,icon:"⚖️"},
+    {id:"strength",label:"Strength",color:V.purple,icon:"🏋️"},
+    {id:"deload",label:"Deload",color:V.warn,icon:"🧘"},
+  ];
+
+  const addPhase=()=>{
+    if(!form.start)return;
+    const p={id:uid(),type:form.type,start:form.start,end:form.end||null,notes:form.notes,active:!form.end};
+    d({type:"SET_PHASES",phases:[...phases,p]});
+    setForm({type:"cut",start:today(),end:"",notes:""});setShowAdd(false);
+  };
+
+  const endPhase=(id)=>d({type:"SET_PHASES",phases:phases.map(p=>p.id===id?{...p,end:today(),active:false}:p)});
+  const deletePhase=(id)=>d({type:"SET_PHASES",phases:phases.filter(p=>p.id!==id)});
+
+  const phaseStats=(phase)=>{
+    const ws=s.workouts.filter(w=>w.date>=phase.start&&(!phase.end||w.date<=phase.end));
+    const bs=s.body.filter(b=>b.date>=phase.start&&(!phase.end||b.date<=phase.end));
+    const ns=s.nutrition.filter(n=>n.date>=phase.start&&(!phase.end||n.date<=phase.end));
+    const startBW=bs.length?bs[bs.length-1].weight:null;
+    const endBW=bs.length?bs[0].weight:null;
+    const avgCal=ns.length?Math.round(ns.reduce((a,n)=>a+n.cal,0)/ns.length):0;
+    const totalVol=ws.reduce((v,w)=>v+w.exercises.reduce((e,ex)=>e+ex.sets.reduce((ss,st)=>ss+st.weight*st.reps,0),0),0);
+    const days=phase.end?Math.ceil((new Date(phase.end)-new Date(phase.start))/86400000):Math.ceil((new Date()-new Date(phase.start))/86400000);
+    return{workouts:ws.length,days,startBW,endBW,bwChange:startBW&&endBW?(endBW-startBW).toFixed(1):null,avgCal,totalVol};
+  };
+
+  const active=phases.find(p=>p.active);
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",gap:12}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div style={{fontSize:16,fontWeight:800,color:V.text}}>Training Phases</div>
+        <button onClick={()=>setShowAdd(true)} style={{padding:"6px 12px",borderRadius:8,
+          background:`${V.accent}12`,border:`1px solid ${V.accent}25`,cursor:"pointer",
+          fontSize:11,fontWeight:700,color:V.accent,fontFamily:V.font}}>+ New Phase</button>
+      </div>
+
+      {active&&(()=>{
+        const pt=phaseTypes.find(t=>t.id===active.type)||phaseTypes[2];
+        const stats=phaseStats(active);
+        return(
+          <Card glow style={{padding:14}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <span style={{fontSize:18}}>{pt.icon}</span>
+                <div>
+                  <div style={{fontSize:14,fontWeight:700,color:V.text}}>Active: {pt.label}</div>
+                  <div style={{fontSize:10,color:V.text3}}>Day {stats.days} · Started {active.start}</div>
+                </div>
+              </div>
+              <button onClick={()=>endPhase(active.id)} style={{padding:"5px 10px",borderRadius:6,
+                background:`${V.warn}12`,border:`1px solid ${V.warn}25`,cursor:"pointer",fontSize:10,fontWeight:700,color:V.warn}}>End Phase</button>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+              {[{l:"Workouts",v:stats.workouts,c:V.accent},{l:"Avg Cal",v:stats.avgCal,c:V.warn},
+                {l:"BW Change",v:stats.bwChange?`${stats.bwChange>0?"+":""}${stats.bwChange}`:"--",c:V.accent2}
+              ].map(m=>(
+                <div key={m.l} style={{textAlign:"center",padding:"8px 0",borderRadius:8,background:"rgba(255,255,255,0.02)"}}>
+                  <div style={{fontSize:16,fontWeight:800,color:m.c,fontFamily:V.mono}}>{m.v}</div>
+                  <div style={{fontSize:8,color:V.text3,fontWeight:600}}>{m.l}</div>
+                </div>
+              ))}
+            </div>
+          </Card>
+        );
+      })()}
+
+      {!active&&phases.length===0&&!showAdd&&(
+        <Card style={{padding:20,textAlign:"center"}}>
+          <div style={{fontSize:28,marginBottom:8}}>📊</div>
+          <div style={{fontSize:13,fontWeight:600,color:V.text}}>No phases tracked yet</div>
+          <div style={{fontSize:11,color:V.text3}}>Tag your training blocks to compare outcomes</div>
+        </Card>
+      )}
+
+      {/* Past phases */}
+      {phases.filter(p=>!p.active).length>0&&(
+        <div>
+          <div style={{fontSize:12,fontWeight:600,color:V.text3,marginBottom:6}}>Past Phases</div>
+          {phases.filter(p=>!p.active).sort((a,b)=>b.start.localeCompare(a.start)).map(p=>{
+            const pt=phaseTypes.find(t=>t.id===p.type)||phaseTypes[2];
+            const stats=phaseStats(p);
+            return(
+              <Card key={p.id} style={{padding:12,marginBottom:6}}>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    <span>{pt.icon}</span>
+                    <div>
+                      <div style={{fontSize:12,fontWeight:700,color:V.text}}>{pt.label} · {stats.days}d</div>
+                      <div style={{fontSize:9,color:V.text3}}>{p.start} → {p.end}</div>
+                    </div>
+                  </div>
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    <div style={{textAlign:"right"}}>
+                      <div style={{fontSize:11,fontWeight:700,color:V.accent,fontFamily:V.mono}}>{stats.workouts} workouts</div>
+                      {stats.bwChange&&<div style={{fontSize:9,color:parseFloat(stats.bwChange)>0?V.accent:V.danger}}>{stats.bwChange>0?"+":""}{stats.bwChange} {s.units}</div>}
+                    </div>
+                    <button onClick={()=>deletePhase(p.id)} style={{background:"none",border:"none",cursor:"pointer",
+                      fontSize:10,color:V.text3,padding:"2px 6px"}}>✕</button>
+                  </div>
+                </div>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+
+      {showAdd&&(
+        <Sheet title="New Training Phase" onClose={()=>setShowAdd(false)}>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12}}>
+            {phaseTypes.map(t=>(
+              <button key={t.id} onClick={()=>setForm(f=>({...f,type:t.id}))} style={{
+                padding:"8px 14px",borderRadius:8,border:`1.5px solid ${form.type===t.id?t.color:V.cardBorder}`,
+                background:form.type===t.id?`${t.color}10`:"rgba(255,255,255,0.02)",
+                cursor:"pointer",display:"flex",alignItems:"center",gap:6}}>
+                <span>{t.icon}</span>
+                <span style={{fontSize:12,fontWeight:600,color:form.type===t.id?t.color:V.text3}}>{t.label}</span>
+              </button>
+            ))}
+          </div>
+          <Field label="Start Date" type="date" value={form.start} onChange={v=>setForm(f=>({...f,start:v}))}/>
+          <Field label="End Date (optional)" type="date" value={form.end} onChange={v=>setForm(f=>({...f,end:v}))}/>
+          <Field label="Notes" value={form.notes} onChange={v=>setForm(f=>({...f,notes:v}))} placeholder="e.g. 500cal deficit, 4x/week"/>
+          <Btn full onClick={addPhase} s={{marginTop:8}}>{Icons.check({size:16,color:V.bg})} Start Phase</Btn>
+        </Sheet>
+      )}
+    </div>
+  );
+}
+
+// ─── #3 Exercise Substitution Intelligence ───
+const EXERCISE_SUBS={
+  // Chest
+  bench:["dbbench","machpress","svbench","pushup"],
+  incbench:["dbincbench","svbench","pushup"],
+  dbbench:["bench","machpress","pushup"],
+  flye:["dbflye","pecfly","pushup"],
+  dip:["pushup","machpress","bench"],
+  // Back
+  deadlift:["rdl","sumo","hyperext","sldl"],
+  row:["dbrow","cablerow","tbarrow","pendlay"],
+  pullup:["latpull","chinup","straightarm"],
+  latpull:["pullup","chinup","straightarm"],
+  // Legs
+  squat:["legpress","goblet","frontsquat","hacksquat"],
+  legpress:["squat","hacksquat","goblet","bss"],
+  lunge:["bss","stepup","goblet"],
+  // Shoulders
+  ohp:["dbohp","arnoldpress","machpress"],
+  lateralraise:["cablelt","machlt","reardelt"],
+  // Arms
+  curl:["hammercurl","preacher","spidercurl"],
+  tricep:["skullcrusher","ohtriext","kickback","dip"],
+};
+
+function SubstitutionFinder({s}){
+  const [selEx,setSelEx]=useState(null);
+  const subs=selEx?EXERCISE_SUBS[selEx]||[]:[];
+  // Also suggest same-category exercises
+  const selCat=s.exercises.find(e=>e.id===selEx)?.cat;
+  const catSubs=selEx?s.exercises.filter(e=>e.cat===selCat&&e.id!==selEx&&!subs.includes(e.id)).slice(0,4):[];
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",gap:12}}>
+      <div style={{fontSize:16,fontWeight:800,color:V.text}}>Exercise Substitutions</div>
+      <div style={{fontSize:12,color:V.text3}}>Find alternatives when equipment is unavailable</div>
+
+      <Field label="Search exercise" value="" onChange={()=>{}} placeholder="Tap an exercise below"/>
+      <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+        {s.exercises.filter(e=>!["Core","Cardio"].includes(e.cat)).slice(0,16).map(ex=>(
+          <button key={ex.id} onClick={()=>setSelEx(ex.id)} style={{
+            padding:"5px 10px",borderRadius:6,border:`1.5px solid ${selEx===ex.id?V.accent:V.cardBorder}`,
+            background:selEx===ex.id?`${V.accent}10`:"rgba(255,255,255,0.02)",
+            cursor:"pointer",fontSize:10,fontWeight:600,color:selEx===ex.id?V.accent:V.text3,fontFamily:V.font
+          }}>{ex.name.length>18?ex.name.slice(0,18)+"…":ex.name}</button>
+        ))}
+      </div>
+
+      {selEx&&(
+        <div>
+          <div style={{fontSize:12,fontWeight:700,color:V.text,marginBottom:6}}>Best alternatives for {s.exercises.find(e=>e.id===selEx)?.name}</div>
+          {subs.length>0?(
+            <div style={{display:"flex",flexDirection:"column",gap:6}}>
+              {subs.map((sid,i)=>{
+                const ex=s.exercises.find(e=>e.id===sid);
+                if(!ex)return null;
+                return(
+                  <Card key={sid} style={{padding:12}}>
+                    <div style={{display:"flex",alignItems:"center",gap:10}}>
+                      <div style={{width:24,height:24,borderRadius:6,background:`${V.accent}12`,
+                        display:"flex",alignItems:"center",justifyContent:"center"}}>
+                        <span style={{fontSize:11,fontWeight:800,color:V.accent,fontFamily:V.mono}}>{i+1}</span>
+                      </div>
+                      <div>
+                        <div style={{fontSize:13,fontWeight:600,color:V.text}}>{ex.name}</div>
+                        <div style={{fontSize:10,color:V.text3}}>{ex.cat} · {i===0?"Best match":"Similar pattern"}</div>
+                      </div>
+                    </div>
+                  </Card>
+                );
+              })}
+            </div>
+          ):(
+            <div style={{fontSize:11,color:V.text3}}>No preset substitutions. Try these from the same muscle group:</div>
+          )}
+          {catSubs.length>0&&(
+            <div style={{marginTop:8}}>
+              <div style={{fontSize:10,color:V.text3,fontWeight:600,marginBottom:4}}>Same muscle group</div>
+              <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                {catSubs.map(ex=>(
+                  <span key={ex.id} style={{padding:"4px 10px",borderRadius:6,background:"rgba(255,255,255,0.03)",
+                    border:`1px solid ${V.cardBorder}`,fontSize:10,color:V.text2}}>{ex.name}</span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── #4 Injury-Aware Training ───
+const JOINT_MAP={
+  shoulder:["ohp","dbohp","lateralraise","arnoldpress","bench","incbench","dip","pushup","facepull","reardelt","cablelt"],
+  knee:["squat","frontsquat","hacksquat","legpress","lunge","bss","legext","stepup","goblet"],
+  lower_back:["deadlift","sumo","rdl","sldl","row","pendlay","hyperext","squat"],
+  elbow:["curl","hammercurl","preacher","tricep","skullcrusher","ohtriext","kickback","bench","ohp"],
+  wrist:["bench","ohp","curl","deadlift","row","pushup"],
+  hip:["squat","deadlift","hipthrust","lunge","bss","sumo","rdl"],
+};
+
+function InjuryManager({s,d}){
+  const [showAdd,setShowAdd]=useState(false);
+  const [form,setForm]=useState({joint:"",severity:"moderate",notes:""});
+  const injuries=s.injuries||[];
+
+  const joints=[
+    {id:"shoulder",label:"Shoulder",icon:"🦾"},{id:"knee",label:"Knee",icon:"🦵"},
+    {id:"lower_back",label:"Lower Back",icon:"🔙"},{id:"elbow",label:"Elbow",icon:"💪"},
+    {id:"wrist",label:"Wrist",icon:"✋"},{id:"hip",label:"Hip",icon:"🦴"},
+  ];
+
+  const addInjury=()=>{
+    if(!form.joint)return;
+    d({type:"SET_INJURIES",injuries:[...injuries,{id:uid(),joint:form.joint,severity:form.severity,notes:form.notes,date:today(),active:true}]});
+    setForm({joint:"",severity:"moderate",notes:""});setShowAdd(false);
+  };
+
+  const resolveInjury=(id)=>d({type:"SET_INJURIES",injuries:injuries.map(inj=>inj.id===id?{...inj,active:false,resolved:today()}:inj)});
+  const deleteInjury=(id)=>d({type:"SET_INJURIES",injuries:injuries.filter(inj=>inj.id!==id)});
+
+  const activeInjuries=injuries.filter(inj=>inj.active);
+  const flaggedExercises=useMemo(()=>{
+    const flagged=new Set();
+    activeInjuries.forEach(inj=>{(JOINT_MAP[inj.joint]||[]).forEach(eid=>flagged.add(eid));});
+    return flagged;
+  },[activeInjuries]);
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",gap:12}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div style={{fontSize:16,fontWeight:800,color:V.text}}>Injury Awareness</div>
+        <button onClick={()=>setShowAdd(true)} style={{padding:"6px 12px",borderRadius:8,
+          background:`${V.warn}12`,border:`1px solid ${V.warn}25`,cursor:"pointer",
+          fontSize:11,fontWeight:700,color:V.warn,fontFamily:V.font}}>+ Flag Pain</button>
+      </div>
+
+      {activeInjuries.length>0?(
+        <div>
+          <div style={{padding:"8px 12px",borderRadius:8,background:`${V.danger}08`,border:`1px solid ${V.danger}15`,marginBottom:8}}>
+            <span style={{fontSize:11,color:V.danger,fontWeight:600}}>{flaggedExercises.size} exercises flagged — consider substitutions or reduced load</span>
+          </div>
+          {activeInjuries.map(inj=>{
+            const j=joints.find(j2=>j2.id===inj.joint);
+            const affected=(JOINT_MAP[inj.joint]||[]).map(eid=>s.exercises.find(e=>e.id===eid)?.name).filter(Boolean);
+            return(
+              <Card key={inj.id} style={{padding:12,marginBottom:6}}>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    <span style={{fontSize:16}}>{j?.icon||"⚠️"}</span>
+                    <div>
+                      <div style={{fontSize:13,fontWeight:700,color:V.text}}>{j?.label||inj.joint}</div>
+                      <div style={{fontSize:9,color:V.text3}}>Since {inj.date} · {inj.severity}</div>
+                    </div>
+                  </div>
+                  <div style={{display:"flex",gap:6}}>
+                    <button onClick={()=>resolveInjury(inj.id)} style={{padding:"4px 8px",borderRadius:6,
+                      background:`${V.accent}12`,border:"none",cursor:"pointer",fontSize:9,color:V.accent,fontWeight:700}}>Resolved</button>
+                    <button onClick={()=>deleteInjury(inj.id)} style={{padding:"4px 8px",borderRadius:6,
+                      background:"rgba(255,107,107,0.08)",border:"none",cursor:"pointer",fontSize:9,color:V.danger}}>✕</button>
+                  </div>
+                </div>
+                {inj.notes&&<div style={{fontSize:10,color:V.text3,fontStyle:"italic",marginBottom:6}}>{inj.notes}</div>}
+                <div style={{fontSize:9,color:V.warn,fontWeight:600,marginBottom:4}}>Affected exercises:</div>
+                <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                  {affected.slice(0,8).map(n=>(
+                    <span key={n} style={{padding:"2px 6px",borderRadius:4,background:`${V.warn}08`,fontSize:8,color:V.warn}}>{n}</span>
+                  ))}
+                </div>
+              </Card>
+            );
+          })}
+        </div>
+      ):(
+        <Card style={{padding:20,textAlign:"center"}}>
+          <div style={{fontSize:28,marginBottom:8}}>💚</div>
+          <div style={{fontSize:13,fontWeight:600,color:V.accent}}>No active injuries</div>
+          <div style={{fontSize:11,color:V.text3}}>Flag pain points to get safer exercise suggestions</div>
+        </Card>
+      )}
+
+      {injuries.filter(inj=>!inj.active).length>0&&(
+        <div>
+          <div style={{fontSize:12,fontWeight:600,color:V.text3,marginBottom:4}}>Resolved</div>
+          {injuries.filter(inj=>!inj.active).map(inj=>(
+            <div key={inj.id} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 0",opacity:0.5}}>
+              <span style={{fontSize:10}}>{joints.find(j=>j.id===inj.joint)?.icon||"✓"}</span>
+              <span style={{fontSize:11,color:V.text3}}>{joints.find(j=>j.id===inj.joint)?.label} · {inj.date} → {inj.resolved}</span>
+              <span style={{flex:1}}/>
+              <button onClick={()=>deleteInjury(inj.id)} style={{background:"none",border:"none",cursor:"pointer",fontSize:9,color:V.text3}}>✕</button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {showAdd&&(
+        <Sheet title="Flag Pain / Injury" onClose={()=>setShowAdd(false)}>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12}}>
+            {joints.map(j=>(
+              <button key={j.id} onClick={()=>setForm(f=>({...f,joint:j.id}))} style={{
+                padding:"10px 14px",borderRadius:10,border:`1.5px solid ${form.joint===j.id?V.warn:V.cardBorder}`,
+                background:form.joint===j.id?`${V.warn}10`:"rgba(255,255,255,0.02)",cursor:"pointer",
+                display:"flex",alignItems:"center",gap:6}}>
+                <span>{j.icon}</span>
+                <span style={{fontSize:12,fontWeight:600,color:form.joint===j.id?V.warn:V.text3}}>{j.label}</span>
+              </button>
+            ))}
+          </div>
+          <div style={{display:"flex",gap:8,marginBottom:12}}>
+            {["mild","moderate","severe"].map(sev=>(
+              <button key={sev} onClick={()=>setForm(f=>({...f,severity:sev}))} style={{
+                flex:1,padding:"8px",borderRadius:8,border:`1.5px solid ${form.severity===sev?(sev==="severe"?V.danger:sev==="moderate"?V.warn:V.accent2):V.cardBorder}`,
+                background:form.severity===sev?`${sev==="severe"?V.danger:sev==="moderate"?V.warn:V.accent2}10`:"rgba(255,255,255,0.02)",
+                cursor:"pointer",fontSize:11,fontWeight:600,color:form.severity===sev?V.text:V.text3,textTransform:"capitalize"}}>
+                {sev}
+              </button>
+            ))}
+          </div>
+          <Field label="Notes (optional)" value={form.notes} onChange={v=>setForm(f=>({...f,notes:v}))} placeholder="e.g. Sharp pain on overhead press"/>
+          <Btn full onClick={addInjury} s={{marginTop:8}}>{Icons.check({size:16,color:V.bg})} Flag Injury</Btn>
+        </Sheet>
+      )}
+    </div>
+  );
+}
+
+// ─── #6 Coach Summary Report ───
+function WeeklySummary({s}){
+  const canvasRef=useRef(null);
+  const [generated,setGenerated]=useState(false);
+
+  const stats=useMemo(()=>{
+    const ws=s.workouts.filter(w=>w.date>=ago(7));
+    const ns=s.nutrition.filter(n=>n.date>=ago(7));
+    const r=calcReadiness(s);
+    const totalVol=ws.reduce((v,w)=>v+w.exercises.reduce((e,ex)=>e+ex.sets.reduce((ss,st)=>ss+st.weight*st.reps,0),0),0);
+    const avgCal=ns.length?Math.round(ns.reduce((a,n)=>a+n.cal,0)/ns.length):0;
+    const avgProt=ns.length?Math.round(ns.reduce((a,n)=>a+n.protein,0)/ns.length):0;
+    const protHit=ns.filter(n=>n.protein>=s.goals.protein*0.8).length;
+    const avgSleep=ns.filter(n=>n.sleep>0).length?
+      (ns.filter(n=>n.sleep>0).reduce((a,n)=>a+n.sleep,0)/ns.filter(n=>n.sleep>0).length).toFixed(1):0;
+    const activePhase=(s.phases||[]).find(p=>p.active);
+    return{workouts:ws.length,totalVol,avgCal,avgProt,protHit,avgSleep,readiness:r.score,readinessLevel:r.level,
+      readinessColor:r.color,phase:activePhase?.type||null};
+  },[s]);
+
+  const gen=()=>{
+    const c=canvasRef.current;if(!c)return;
+    const ctx=c.getContext("2d");c.width=600;c.height=440;
+    const grad=ctx.createLinearGradient(0,0,600,440);
+    grad.addColorStop(0,"#0a0a14");grad.addColorStop(1,"#14142a");
+    ctx.fillStyle=grad;ctx.fillRect(0,0,600,440);
+    ctx.fillStyle="#22d3ee";ctx.fillRect(0,0,4,440);
+
+    ctx.fillStyle="#fff";ctx.font="bold 24px -apple-system, sans-serif";
+    ctx.fillText("WEEKLY REVIEW",24,40);
+    ctx.fillStyle="#666";ctx.font="13px -apple-system, sans-serif";
+    const end=new Date();const start=new Date();start.setDate(start.getDate()-7);
+    ctx.fillText(`${start.toLocaleDateString("en-US",{month:"short",day:"numeric"})} - ${end.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}`,24,62);
+
+    if(stats.phase){ctx.fillStyle="#a78bfa";ctx.font="bold 11px -apple-system, sans-serif";ctx.fillText(`PHASE: ${stats.phase.toUpperCase()}`,420,40);}
+
+    const rows=[
+      {l:"WORKOUTS",v:String(stats.workouts),sub:"/7 days"},
+      {l:"VOLUME",v:stats.totalVol>1000?`${(stats.totalVol/1000).toFixed(1)}k`:""+stats.totalVol,sub:"total lbs"},
+      {l:"AVG CALORIES",v:String(stats.avgCal),sub:"kcal/day"},
+      {l:"AVG PROTEIN",v:`${stats.avgProt}g`,sub:`hit ${stats.protHit}/7 days`},
+      {l:"AVG SLEEP",v:`${stats.avgSleep}h`,sub:"per night"},
+      {l:"READINESS",v:String(stats.readiness),sub:stats.readinessLevel},
+    ];
+    rows.forEach((r,i)=>{
+      const y=100+i*52;
+      ctx.fillStyle="#444";ctx.fillRect(24,y+35,552,1);
+      ctx.fillStyle="#888";ctx.font="10px -apple-system, sans-serif";ctx.fillText(r.l,24,y+12);
+      ctx.fillStyle="#22d3ee";ctx.font="bold 24px -apple-system, sans-serif";ctx.fillText(r.v,24,y+34);
+      ctx.fillStyle="#555";ctx.font="12px -apple-system, sans-serif";ctx.fillText(r.sub,180,y+34);
+    });
+
+    ctx.fillStyle="#333";ctx.font="bold 11px -apple-system, sans-serif";ctx.fillText("IRONLOG",24,425);
+    ctx.fillStyle="#555";ctx.font="10px -apple-system, sans-serif";ctx.fillText("ironlog.space",100,425);
+    setGenerated(true);
+  };
+
+  const share=()=>{
+    const c=canvasRef.current;if(!c)return;
+    c.toBlob(blob=>{
+      if(navigator.share&&blob){
+        navigator.share({files:[new File([blob],"weekly-review.png",{type:"image/png"})],title:"Weekly Review"}).catch(()=>{});
+      }else{
+        const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=`review-${today()}.png`;a.click();URL.revokeObjectURL(url);
+      }
+    },"image/png");
+  };
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",gap:12}}>
+      <div style={{fontSize:16,fontWeight:800,color:V.text}}>Weekly Summary</div>
+
+      <Card style={{padding:14}}>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
+          {[{l:"Workouts",v:stats.workouts,c:V.accent},{l:"Avg Cal",v:stats.avgCal,c:V.warn},{l:"Readiness",v:stats.readiness,c:stats.readinessColor},
+            {l:"Protein Hit",v:`${stats.protHit}/7`,c:V.accent2},{l:"Avg Sleep",v:`${stats.avgSleep}h`,c:V.purple},{l:"Volume",v:stats.totalVol>1000?`${(stats.totalVol/1000).toFixed(1)}k`:stats.totalVol,c:V.accent}
+          ].map(m=>(
+            <div key={m.l} style={{textAlign:"center",padding:"10px 0",borderRadius:8,background:"rgba(255,255,255,0.02)"}}>
+              <div style={{fontSize:18,fontWeight:800,color:m.c,fontFamily:V.mono}}>{m.v}</div>
+              <div style={{fontSize:8,color:V.text3,fontWeight:600}}>{m.l}</div>
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      <canvas ref={canvasRef} style={{width:"100%",borderRadius:12,display:generated?"block":"none"}}/>
+      {!generated?(
+        <Btn full onClick={gen}>{Icons.chart({size:14,color:V.bg})} Generate Report Card</Btn>
+      ):(
+        <div style={{display:"flex",gap:8}}>
+          <Btn full onClick={share}>{Icons.upload({size:14,color:V.bg})} Share</Btn>
+          <Btn v="secondary" full onClick={()=>setGenerated(false)}>Close</Btn>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Log Hub ───
 function LogHub({s,d}){
   return(
@@ -4578,10 +5302,18 @@ function TrackHub({s,d}){
         {id:"track_analytics",icon:Icons.chart,label:"Analytics",desc:"Trends & charts",color:V.purple},
       ]}/>
 
-      <Section title="Tools" items={[
+      <Section title="Training Tools" items={[
+        {id:"track_phases",icon:Icons.calendar,label:"Phases",desc:"Cut / bulk / strength",color:"#a78bfa"},
+        {id:"track_injuries",icon:Icons.activity,label:"Injuries",desc:"Pain flags & subs",color:V.danger},
+        {id:"track_subs",icon:Icons.refresh,label:"Substitutions",desc:"Alt exercises",color:"#34d399"},
+        {id:"track_formcheck",icon:Icons.target,label:"Form Check",desc:"Record & review",color:"#f472b6"},
+      ]}/>
+
+      <Section title="Metrics & Reports" items={[
         {id:"track_muscles",icon:Icons.activity,label:"Heat Map",desc:"Muscle balance",color:"#f97316"},
         {id:"track_strength",icon:Icons.trophy,label:"Strength",desc:"Score & rank",color:"#a855f7"},
-        {id:"track_formcheck",icon:Icons.target,label:"Form Check",desc:"Record & review",color:"#f472b6"},
+        {id:"track_dataguard",icon:Icons.target,label:"Data Guard",desc:"Integrity check",color:V.warn},
+        {id:"track_summary",icon:Icons.chart,label:"Weekly Report",desc:"Summary card",color:"#22d3ee"},
         {id:"track_onerm",icon:Icons.zap,label:"1RM Calc",desc:"Estimate max",color:V.warn},
       ]}/>
 
@@ -4595,21 +5327,55 @@ function TrackHub({s,d}){
 function App(){
   const [s,d]=useReducer(reducer,init);
   const contentRef=useRef(null);
+  const [installPrompt,setInstallPrompt]=useState(null);
+  const [showInstallBanner,setShowInstallBanner]=useState(false);
 
   // Scroll to top when tab changes
   useEffect(()=>{
     if(contentRef.current)contentRef.current.scrollTop=0;
   },[s.tab]);
 
+  // Capture beforeinstallprompt for smart install banner
+  useEffect(()=>{
+    const handler=(e)=>{e.preventDefault();setInstallPrompt(e);
+      // Show banner if user hasn't dismissed and has used app 3+ times
+      const visits=parseInt(LS.get("ft-visits")||"0")+1;
+      LS.set("ft-visits",visits);
+      if(visits>=3&&!LS.get("ft-install-dismissed"))setShowInstallBanner(true);
+    };
+    window.addEventListener("beforeinstallprompt",handler);
+    return()=>window.removeEventListener("beforeinstallprompt",handler);
+  },[]);
+
+  // Handle manifest shortcut deep links (hash routing)
+  useEffect(()=>{
+    const hash=window.location.hash.replace("#","");
+    if(hash&&["log_workout","log_nutrition","log_body","track_coach","track_readiness","track_goals"].includes(hash)){
+      d({type:"TAB",tab:hash});
+      window.location.hash="";
+    }
+  },[]);
+
+  // Listen for SW navigation messages (from notification action clicks)
+  useEffect(()=>{
+    const handler=(e)=>{
+      if(e.data?.type==="NAVIGATE"&&e.data.tab){d({type:"TAB",tab:e.data.tab});}
+    };
+    navigator.serviceWorker?.addEventListener("message",handler);
+    return()=>navigator.serviceWorker?.removeEventListener("message",handler);
+  },[]);
+
   useEffect(()=>{
     (async()=>{
       try{
         const data={};
-        ["ft-w","ft-n","ft-b","ft-ex","ft-g","ft-sched","ft-units","ft-onb","ft-photos","ft-profile","ft-checkins","ft-milestones"].forEach(k=>{const v=LS.get(k);if(v!==null)data[k]=v;});
+        ["ft-w","ft-n","ft-b","ft-ex","ft-g","ft-sched","ft-units","ft-onb","ft-photos","ft-profile","ft-checkins","ft-milestones","ft-phases","ft-injuries","ft-syncprefs","ft-a11y"].forEach(k=>{const v=LS.get(k);if(v!==null)data[k]=v;});
         d({type:"INIT",p:{workouts:data["ft-w"]||[],nutrition:data["ft-n"]||[],body:data["ft-b"]||[],
           exercises:data["ft-ex"]||defaultExercises,goals:data["ft-g"]||init.goals,schedule:data["ft-sched"]||defaultSchedule,
           units:data["ft-units"]||"lbs",onboarded:data["ft-onb"]||false,photos:data["ft-photos"]||[],
-          profile:data["ft-profile"]||init.profile,checkins:data["ft-checkins"]||[],milestones:data["ft-milestones"]||[]}});
+          profile:data["ft-profile"]||init.profile,checkins:data["ft-checkins"]||[],milestones:data["ft-milestones"]||[],
+          phases:data["ft-phases"]||[],injuries:data["ft-injuries"]||[],
+          syncPrefs:data["ft-syncprefs"]||init.syncPrefs,a11y:data["ft-a11y"]||init.a11y}});
       }catch(e){
         d({type:"INIT",p:{exercises:defaultExercises,goals:init.goals,schedule:defaultSchedule}});
       }
@@ -4631,12 +5397,16 @@ function App(){
       LS.set("ft-profile",s.profile);
       LS.set("ft-checkins",s.checkins||[]);
       LS.set("ft-milestones",s.milestones||[]);
+      LS.set("ft-phases",s.phases||[]);
+      LS.set("ft-injuries",s.injuries||[]);
+      LS.set("ft-syncprefs",s.syncPrefs||init.syncPrefs);
+      LS.set("ft-a11y",s.a11y||init.a11y);
       // Auto-sync to cloud (debounced)
       if(s.onboarded&&s.profile?.email){
         CloudSync.debouncedPush(s);
       }
     }catch(e){}})();
-  },[s.workouts,s.nutrition,s.body,s.exercises,s.goals,s.schedule,s.units,s.onboarded,s.photos,s.profile,s.checkins,s.milestones,s.loaded]);
+  },[s.workouts,s.nutrition,s.body,s.exercises,s.goals,s.schedule,s.units,s.onboarded,s.photos,s.profile,s.checkins,s.milestones,s.phases,s.injuries,s.syncPrefs,s.a11y,s.loaded]);
 
   // Sync on app open — push local data to server
   useEffect(()=>{
@@ -4652,6 +5422,64 @@ function App(){
     navigator.serviceWorker?.addEventListener("message",handler);
     return()=>navigator.serviceWorker?.removeEventListener("message",handler);
   },[]);
+
+  // Reminder notifications with action buttons
+  useEffect(()=>{
+    if(!s.loaded||!s.onboarded||!LS.get("ft-reminders"))return;
+    const lastReminder=LS.get("ft-last-reminder");
+    const td=today();
+    if(lastReminder===td)return;
+    LS.set("ft-last-reminder",td);
+    const dow=new Date().getDay();
+    const todayType=s.schedule.overrides[td]||s.schedule.weekly[dow]||"Rest";
+    const hasCheckin=(s.checkins||[]).some(c=>c.date===td);
+    const hasWorkout=s.workouts.some(w=>w.date===td);
+
+    if("Notification" in window&&Notification.permission==="granted"&&navigator.serviceWorker?.controller){
+      // Use SW for rich notifications with action buttons
+      navigator.serviceWorker.ready.then(reg=>{
+        if(todayType!=="Rest"&&!hasWorkout){
+          setTimeout(()=>reg.showNotification("IRONLOG",{
+            body:`${todayType} day — time to get after it!`,
+            icon:"./icon.svg",badge:"./icon.svg",
+            tag:"workout-reminder",
+            vibrate:[100,50,100],
+            actions:[
+              {action:"log_workout",title:"Log Workout"},
+              {action:"dismiss",title:"Skip Today"}
+            ]
+          }),2000);
+        }
+        if(!hasCheckin){
+          setTimeout(()=>reg.showNotification("IRONLOG",{
+            body:"Quick 30-sec check-in — how are you feeling?",
+            icon:"./icon.svg",badge:"./icon.svg",
+            tag:"checkin-reminder",
+            actions:[
+              {action:"checkin",title:"Check In"},
+              {action:"dismiss",title:"Later"}
+            ]
+          }),6000);
+        }
+        // Hydration reminder in afternoon
+        const hr=new Date().getHours();
+        if(hr>=13&&hr<=16){
+          const tn=s.nutrition.find(n=>n.date===td);
+          if(!tn||tn.water<4){
+            setTimeout(()=>reg.showNotification("IRONLOG",{
+              body:"Stay hydrated — log your water intake",
+              icon:"./icon.svg",badge:"./icon.svg",
+              tag:"hydration",
+              actions:[
+                {action:"log_nutrition",title:"Log Water"},
+                {action:"dismiss",title:"Done"}
+              ]
+            }),10000);
+          }
+        }
+      });
+    }
+  },[s.loaded,s.onboarded]);
 
   // Show onboarding if first launch
   if(s.loaded&&!s.onboarded) return <Onboarding d={d}/>;
@@ -4680,10 +5508,15 @@ function App(){
     {id:"settings",icon:Icons.target,label:"Settings"},
   ];
 
+  const a11y=s.a11y||{};
+
   return(
     <div style={{
-      height:"100%",maxWidth:430,margin:"0 auto",background:V.bg,color:V.text,fontFamily:V.font,
+      height:"100%",maxWidth:430,margin:"0 auto",background:a11y.highContrast?"#000":V.bg,
+      color:a11y.highContrast?"#fff":V.text,fontFamily:V.font,
       display:"flex",flexDirection:"column",position:"relative",
+      fontSize:a11y.largeText?"17px":"16px",
+      ...(a11y.reduceMotion?{transition:"none"}:{}),
     }}>
 
       {/* Status Bar Area */}
@@ -4723,6 +5556,30 @@ function App(){
         </div>
       )}
 
+      {/* Install app banner */}
+      {showInstallBanner&&installPrompt&&(
+        <div style={{padding:"10px 20px",background:"linear-gradient(135deg,rgba(0,245,160,0.08),rgba(0,217,245,0.08))",
+          borderBottom:`1px solid rgba(0,245,160,0.15)`,
+          display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}}>
+          <div style={{flex:1}}>
+            <div style={{fontSize:12,fontWeight:700,color:V.text}}>Install IRONLOG</div>
+            <div style={{fontSize:9,color:V.text3}}>Add to home screen for the full app experience</div>
+          </div>
+          <div style={{display:"flex",gap:6}}>
+            <button onClick={async()=>{
+              installPrompt.prompt();
+              const result=await installPrompt.userChoice;
+              if(result.outcome==="accepted")LS.set("ft-installed",true);
+              setShowInstallBanner(false);setInstallPrompt(null);
+            }} style={{padding:"6px 14px",borderRadius:8,background:V.accent,border:"none",cursor:"pointer",
+              fontSize:11,fontWeight:700,color:V.bg,fontFamily:V.font}}>Install</button>
+            <button onClick={()=>{setShowInstallBanner(false);LS.set("ft-install-dismissed",true);}}
+              style={{padding:"6px 8px",borderRadius:8,background:"rgba(255,255,255,0.05)",border:"none",
+                cursor:"pointer",fontSize:11,color:V.text3}}>✕</button>
+          </div>
+        </div>
+      )}
+
       {/* Content — scrollable region */}
       <div ref={contentRef} style={{flex:1,minHeight:0,overflowY:"auto",overflowX:"hidden",
         WebkitOverflowScrolling:"touch",padding:"0 16px 24px",
@@ -4750,6 +5607,11 @@ function App(){
         {s.tab==="track_muscles"&&<div><SubBack to="track" label="Track"/><MuscleHeatMap s={s}/></div>}
         {s.tab==="track_strength"&&<div><SubBack to="track" label="Track"/><StrengthScoreCard s={s}/></div>}
         {s.tab==="track_formcheck"&&<div><SubBack to="track" label="Track"/><FormCheckTab s={s} d={d}/></div>}
+        {s.tab==="track_phases"&&<div><SubBack to="track" label="Track"/><PhaseTracker s={s} d={d}/></div>}
+        {s.tab==="track_injuries"&&<div><SubBack to="track" label="Track"/><InjuryManager s={s} d={d}/></div>}
+        {s.tab==="track_subs"&&<div><SubBack to="track" label="Track"/><SubstitutionFinder s={s}/></div>}
+        {s.tab==="track_dataguard"&&<div><SubBack to="track" label="Track"/><DataGuardTab s={s} d={d}/></div>}
+        {s.tab==="track_summary"&&<div><SubBack to="track" label="Track"/><WeeklySummary s={s}/></div>}
         {s.tab==="track_onerm"&&<div><SubBack to="track" label="Track"/><OneRMCalc units={s.units}/></div>}
 
         {/* Global footer on every page */}
