@@ -1,4 +1,4 @@
-var CACHE_NAME = 'ironlog-v6';
+var CACHE_NAME = 'ironlog-v7-' + Date.now();
 var APP_FILES = ['./', './index.html', './icon.svg', './manifest.json'];
 
 // ─── Install ───
@@ -159,31 +159,58 @@ function processSyncQueue() {
         var items = getAll.result;
         if (!items || items.length === 0) { resolve(); return; }
         
-        // Process each queued sync
-        var promises = items.map(function(item) {
-          return fetch(item.url, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: item.body
-          }).then(function(res) {
-            if (res.ok) {
-              // Remove from queue on success
-              var delTx = db.transaction('queue', 'readwrite');
-              delTx.objectStore('queue').delete(item.id);
-              return true;
-            }
-            return false;
-          }).catch(function() { return false; });
-        });
+        // #9 Queue compaction: if multiple items, keep only the latest (full-state push)
+        var latest = items[items.length - 1];
+        var stale = items.slice(0, -1);
+        
+        // #9 TTL: expire items older than 24 hours
+        var now = Date.now();
+        var ttl = 24 * 60 * 60 * 1000;
+        if (new Date(latest.timestamp).getTime() + ttl < now) {
+          // All expired, clear queue
+          var clearTx = db.transaction('queue', 'readwrite');
+          clearTx.objectStore('queue').clear();
+          resolve(); return;
+        }
 
-        Promise.all(promises).then(function(results) {
-          var synced = results.filter(function(r) { return r; }).length;
-          // Notify client of sync completion
+        // Remove stale items (compaction)
+        if (stale.length > 0) {
+          var delTx = db.transaction('queue', 'readwrite');
+          stale.forEach(function(item) { delTx.objectStore('queue').delete(item.id); });
+        }
+
+        // Process latest item with retry
+        var retries = latest.retries || 0;
+        if (retries >= 5) {
+          // Max retries, remove
+          var rmTx = db.transaction('queue', 'readwrite');
+          rmTx.objectStore('queue').delete(latest.id);
           self.clients.matchAll().then(function(clients) {
-            clients.forEach(function(c) {
-              c.postMessage({type: 'SYNC_COMPLETE', synced: synced, remaining: items.length - synced});
-            });
+            clients.forEach(function(c) { c.postMessage({type: 'SYNC_COMPLETE', synced: 0, remaining: 0, failed: true}); });
           });
+          resolve(); return;
+        }
+
+        fetch(latest.url, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: latest.body
+        }).then(function(res) {
+          if (res.ok) {
+            var okTx = db.transaction('queue', 'readwrite');
+            okTx.objectStore('queue').delete(latest.id);
+            self.clients.matchAll().then(function(clients) {
+              clients.forEach(function(c) { c.postMessage({type: 'SYNC_COMPLETE', synced: 1, remaining: 0}); });
+            });
+          } else {
+            // Increment retry count with backoff
+            var retryTx = db.transaction('queue', 'readwrite');
+            retryTx.objectStore('queue').put(Object.assign({}, latest, {retries: retries + 1}));
+          }
+          resolve();
+        }).catch(function() {
+          var retryTx = db.transaction('queue', 'readwrite');
+          retryTx.objectStore('queue').put(Object.assign({}, latest, {retries: (latest.retries || 0) + 1}));
           resolve();
         });
       };

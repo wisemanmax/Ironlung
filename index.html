@@ -140,6 +140,28 @@ const LS={
   set:(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}},
 };
 
+// ─── #1 Auth Token (signed sync requests) ───
+const AuthToken={
+  init:(email)=>{let key=LS.get("ft-auth-key");if(!key){key=uid()+uid()+uid();LS.set("ft-auth-key",key);}},
+  generate:(email)=>{
+    const key=LS.get("ft-auth-key")||"";
+    const payload=btoa(JSON.stringify({e:email.toLowerCase(),d:LS.get("ft-device-id")||"unknown",
+      x:Date.now()+3600000,i:Date.now()}));
+    let hash=0;const str=payload+key;
+    for(let i=0;i<str.length;i++){hash=((hash<<5)-hash)+str.charCodeAt(i);hash|=0;}
+    return payload+"."+Math.abs(hash).toString(36);
+  },
+  getHeaders:(email)=>({"Content-Type":"application/json","X-Auth-Token":AuthToken.generate(email)}),
+};
+
+// ─── #2 Undo System ───
+let _undoItem=null;let _undoTimer=null;
+const Undo={
+  set:(label,item,type)=>{_undoItem={label,item,type,ts:Date.now()};if(_undoTimer)clearTimeout(_undoTimer);_undoTimer=setTimeout(()=>{_undoItem=null;},6000);},
+  get:()=>_undoItem,
+  clear:()=>{_undoItem=null;if(_undoTimer)clearTimeout(_undoTimer);},
+};
+
 // ─── Cloud Sync Engine ───
 const SYNC_URL="https://ironlog-api.vercel.app";
 let syncTimer=null;
@@ -210,7 +232,7 @@ const CloudSync={
       settings:{goals:state.goals,schedule:state.schedule,exercises:state.exercises,units:state.units},
     });
     try{
-      const res=await fetch(`${SYNC_URL}/api/sync/push`,{method:"POST",headers:{"Content-Type":"application/json"},body:payload});
+      const res=await fetch(`${SYNC_URL}/api/sync/push`,{method:"POST",headers:AuthToken.getHeaders(email),body:payload});
       if(!res.ok)throw new Error("Push failed");
       LS.set("ft-last-sync",new Date().toISOString());
       LS.set("ft-pending-sync",0);
@@ -561,10 +583,13 @@ function reducer(s,a){
     case "RANGE": return{...s,range:a.d};
     case "MODAL": return{...s,modal:a.modal};
     case "ADD_W": return{...s,workouts:[a.w,...s.workouts].sort((a,b)=>b.date.localeCompare(a.date))};
+    case "EDIT_W": return{...s,workouts:s.workouts.map(w=>w.id===a.w.id?{...a.w}:w)};
     case "DEL_W": return{...s,workouts:s.workouts.filter(w=>w.id!==a.id)};
     case "ADD_N": return{...s,nutrition:[...s.nutrition.filter(n=>n.date!==a.n.date),a.n].sort((a,b)=>b.date.localeCompare(a.date))};
+    case "EDIT_N": return{...s,nutrition:s.nutrition.map(n=>n.id===a.n.id?{...a.n}:n)};
     case "DEL_N": return{...s,nutrition:s.nutrition.filter(n=>n.id!==a.id)};
     case "ADD_B": return{...s,body:[a.b,...s.body].sort((a,b)=>b.date.localeCompare(a.date))};
+    case "EDIT_B": return{...s,body:s.body.map(b=>b.id===a.b.id?{...a.b}:b)};
     case "DEL_B": return{...s,body:s.body.filter(b=>b.id!==a.id)};
     case "GOALS": return{...s,goals:{...s.goals,...a.g}};
     case "ADD_EX": return{...s,exercises:[...s.exercises,a.ex]};
@@ -598,6 +623,173 @@ const V = {
   accent: "#00f5a0", accent2: "#00d9f5", warn: "#ff9f43", danger: "#ff6b6b", purple: "#a78bfa",
   text: "#e8e8ec", text2: "#8b8b9e", text3: "#4a4a5c", font: "'Outfit', sans-serif", mono: "'JetBrains Mono', monospace",
 };
+
+// ─── #11 Error Boundary ───
+class ErrorBoundary extends React.Component{
+  constructor(p){super(p);this.state={err:null};}
+  static getDerivedStateFromError(e){return{err:e};}
+  componentDidCatch(e,info){console.error("IRONLOG Error:",e,info);}
+  render(){
+    if(this.state.err)return React.createElement("div",{style:{padding:40,textAlign:"center",background:V.bg,color:V.text,minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16,fontFamily:V.font}},
+      React.createElement("div",{style:{fontSize:48}},"⚠️"),
+      React.createElement("div",{style:{fontSize:18,fontWeight:700}},"Something went wrong"),
+      React.createElement("div",{style:{fontSize:12,color:V.text3,maxWidth:300}},this.state.err?.message||"Unknown error"),
+      React.createElement("button",{onClick:()=>window.location.reload(),style:{padding:"12px 24px",borderRadius:10,background:V.accent,border:"none",cursor:"pointer",fontSize:14,fontWeight:700,color:V.bg}},"Reload App"),
+      React.createElement("button",{onClick:()=>{try{const d=JSON.stringify({workouts:JSON.parse(localStorage.getItem("ft-w")||"[]"),nutrition:JSON.parse(localStorage.getItem("ft-n")||"[]"),body:JSON.parse(localStorage.getItem("ft-b")||"[]")});const b=new Blob([d],{type:"application/json"});const u=URL.createObjectURL(b);const a=document.createElement("a");a.href=u;a.download="ironlog-emergency-backup.json";a.click();}catch(e){alert("Export failed: "+e.message);}},
+        style:{padding:"8px 16px",borderRadius:8,background:"rgba(255,255,255,0.05)",border:`1px solid ${V.cardBorder}`,cursor:"pointer",fontSize:11,color:V.text3}},"Emergency Data Export")
+    );
+    return this.props.children;
+  }
+}
+
+// ─── #2 Confirm Dialog ───
+function ConfirmDialog({msg,detail,onConfirm,onCancel}){
+  return(
+    <div style={{position:"fixed",inset:0,zIndex:2000,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+      <div style={{position:"absolute",inset:0,background:"rgba(0,0,0,.7)",backdropFilter:"blur(4px)"}} onClick={onCancel}/>
+      <div role="alertdialog" aria-modal="true" aria-label={msg} style={{position:"relative",background:"linear-gradient(180deg,#1a1a28,#0e0e16)",
+        borderRadius:16,padding:24,maxWidth:320,width:"100%",border:`1px solid ${V.cardBorder}`}}>
+        <div style={{fontSize:15,fontWeight:700,color:V.text,marginBottom:6}}>{msg}</div>
+        {detail&&<div style={{fontSize:12,color:V.text3,lineHeight:1.5,marginBottom:16}}>{detail}</div>}
+        <div style={{display:"flex",gap:10}}>
+          <Btn v="secondary" full onClick={onCancel}>Cancel</Btn>
+          <Btn full onClick={onConfirm} s={{background:V.danger}}>Delete</Btn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── #2 Undo Toast ───
+function UndoToast({d}){
+  const [item,setItem]=useState(null);
+  useEffect(()=>{
+    const iv=setInterval(()=>{const u=Undo.get();setItem(u);},200);
+    return()=>clearInterval(iv);
+  },[]);
+  if(!item)return null;
+  const doUndo=()=>{
+    const u=Undo.get();if(!u)return;
+    if(u.type==="workout")d({type:"ADD_W",w:u.item});
+    else if(u.type==="nutrition")d({type:"ADD_N",n:u.item});
+    else if(u.type==="body")d({type:"ADD_B",b:u.item});
+    else if(u.type==="photo")d({type:"ADD_PHOTO",photo:u.item});
+    Undo.clear();setItem(null);
+  };
+  return(
+    <div style={{position:"fixed",bottom:80,left:"50%",transform:"translateX(-50%)",zIndex:1500,
+      padding:"10px 16px",background:"rgba(30,30,50,0.95)",borderRadius:12,border:`1px solid ${V.cardBorder}`,
+      display:"flex",alignItems:"center",gap:10,boxShadow:"0 4px 20px rgba(0,0,0,0.4)"}}>
+      <span style={{fontSize:12,color:V.text}}>{item.label}</span>
+      <button onClick={doUndo} style={{padding:"4px 12px",borderRadius:6,background:V.accent,border:"none",
+        cursor:"pointer",fontSize:11,fontWeight:700,color:V.bg,fontFamily:V.font}}>Undo</button>
+    </div>
+  );
+}
+
+// ─── #3 Pre-save Validation ───
+function validateWorkout(w,s){
+  const warnings=[];
+  w.exercises.forEach(ex=>{
+    const name=s.exercises.find(e=>e.id===ex.exerciseId)?.name||ex.exerciseId;
+    ex.sets.forEach(st=>{
+      if(st.weight>800)warnings.push(`${name}: ${st.weight} ${wUnit(s.units)} seems extremely high`);
+      if(st.reps>100)warnings.push(`${name}: ${st.reps} reps seems high`);
+    });
+  });
+  // Duplicate check
+  const dupes=s.workouts.filter(wk=>wk.date===w.date&&wk.exercises.map(e=>e.exerciseId).sort().join(",")===w.exercises.map(e=>e.exerciseId).sort().join(","));
+  if(dupes.length>0)warnings.push("You already logged a similar workout today");
+  return warnings;
+}
+function validateNutrition(n){
+  const w=[];
+  if(n.cal>8000)w.push(`${n.cal} calories seems extremely high`);
+  if(n.protein>500)w.push(`${n.protein}g protein seems very high`);
+  return w;
+}
+function validateBody(b,s){
+  const w=[];
+  const last=s.body[0];
+  if(last&&b.weight>0&&Math.abs(b.weight-last.weight)>20)
+    w.push(`Weight change of ${Math.abs(b.weight-last.weight).toFixed(1)} ${wUnit(s.units)} from last entry`);
+  return w;
+}
+
+// ─── #3 Validation Confirm Dialog ───
+function ValidationWarning({warnings,onConfirm,onCancel}){
+  if(!warnings||warnings.length===0)return null;
+  return(
+    <div style={{position:"fixed",inset:0,zIndex:2000,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+      <div style={{position:"absolute",inset:0,background:"rgba(0,0,0,.7)"}} onClick={onCancel}/>
+      <div role="alertdialog" aria-modal="true" style={{position:"relative",background:"linear-gradient(180deg,#1a1a28,#0e0e16)",
+        borderRadius:16,padding:24,maxWidth:340,width:"100%",border:`1px solid ${V.warn}30`}}>
+        <div style={{fontSize:15,fontWeight:700,color:V.warn,marginBottom:8}}>⚠️ Heads up</div>
+        <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:16}}>
+          {warnings.map((w,i)=><div key={i} style={{fontSize:12,color:V.text2,lineHeight:1.4,padding:"6px 0",borderBottom:`1px solid rgba(255,255,255,0.03)`}}>• {w}</div>)}
+        </div>
+        <div style={{display:"flex",gap:10}}>
+          <Btn v="secondary" full onClick={onCancel}>Go Back</Btn>
+          <Btn full onClick={onConfirm}>Save Anyway</Btn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── #5 Searchable Exercise Picker ───
+function ExercisePicker({exercises,value,onChange,catFilter,setCatFilter}){
+  const [search,setSearch]=useState("");
+  const cats=["All",...new Set(exercises.map(e=>e.cat))];
+  const recent=LS.get("ft-recent-exercises")||[];
+  const filtered=useMemo(()=>{
+    let list=exercises;
+    if(catFilter&&catFilter!=="All")list=list.filter(e=>e.cat===catFilter);
+    if(search)list=list.filter(e=>e.name.toLowerCase().includes(search.toLowerCase()));
+    // Pin recent exercises to top
+    if(!search&&(!catFilter||catFilter==="All")){
+      const recentExs=recent.map(id=>exercises.find(e=>e.id===id)).filter(Boolean);
+      const rest=list.filter(e=>!recent.includes(e.id));
+      list=[...recentExs,...rest];
+    }
+    return list.slice(0,30);
+  },[exercises,catFilter,search,recent]);
+
+  const select=(id)=>{
+    onChange(id);
+    // Track recent
+    const r=[id,...(recent||[]).filter(r2=>r2!==id)].slice(0,5);
+    LS.set("ft-recent-exercises",r);
+  };
+
+  return(
+    <div>
+      <div style={{position:"relative",marginBottom:8}}>
+        <div style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)"}}>{Icons.search({size:14,color:V.text3})}</div>
+        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search exercises..."
+          aria-label="Search exercises"
+          style={{width:"100%",padding:"10px 14px 10px 34px",background:"rgba(255,255,255,0.04)",border:`1px solid ${V.cardBorder}`,
+            borderRadius:10,color:V.text,fontSize:13,outline:"none",boxSizing:"border-box",minHeight:40,fontFamily:V.font}}/>
+      </div>
+      <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:8}} role="tablist">
+        {cats.map(c=><Chip key={c} label={c} active={(catFilter||"All")===c} onClick={()=>setCatFilter(c==="All"?null:c)}/>)}
+      </div>
+      <div style={{maxHeight:200,overflowY:"auto",WebkitOverflowScrolling:"touch"}}>
+        {filtered.map(ex=>(
+          <button key={ex.id} onClick={()=>select(ex.id)} aria-label={`Add ${ex.name}`}
+            style={{display:"flex",alignItems:"center",gap:8,width:"100%",padding:"8px 10px",background:value===ex.id?`${V.accent}10`:"transparent",
+              border:"none",borderBottom:"1px solid rgba(255,255,255,0.03)",cursor:"pointer",textAlign:"left",WebkitTapHighlightColor:"transparent"}}>
+            <div style={{flex:1}}>
+              <div style={{fontSize:12,color:value===ex.id?V.accent:V.text,fontWeight:value===ex.id?700:400}}>{ex.name}</div>
+              <div style={{fontSize:9,color:V.text3}}>{ex.cat}{recent.includes(ex.id)?" · Recent":""}</div>
+            </div>
+            {ex.yt&&<span style={{fontSize:8,color:V.text3}}>📹</span>}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 // ─── Shared Mobile Components ───
 const Card = ({children, style:s={}, onClick, glow}) => (
@@ -642,8 +834,8 @@ const Progress = ({val,max,color=V.accent,h=6}) => (
   </div>
 );
 
-const Sheet = ({title,onClose,children}) => (
-  <div style={{position:"fixed",inset:0,zIndex:1000,display:"flex",flexDirection:"column",justifyContent:"flex-end"}}>
+const Sheet = ({title,onClose,children,footer}) => (
+  <div style={{position:"fixed",inset:0,zIndex:1000,display:"flex",flexDirection:"column",justifyContent:"flex-end"}} role="dialog" aria-modal="true" aria-label={title}>
     <div style={{position:"absolute",inset:0,background:"rgba(0,0,0,.65)",backdropFilter:"blur(6px)"}} onClick={onClose}/>
     <div style={{position:"relative",background:"linear-gradient(180deg,#1a1a28,#0e0e16)",borderRadius:"20px 20px 0 0",
       maxHeight:"92vh",display:"flex",flexDirection:"column",paddingBottom:"env(safe-area-inset-bottom, 20px)"}}>
@@ -661,7 +853,12 @@ const Sheet = ({title,onClose,children}) => (
         </button>
         <h3 style={{margin:0,fontSize:16,color:V.text,fontFamily:V.font,fontWeight:700,flex:1,textAlign:"center",paddingRight:50}}>{title}</h3>
       </div>
-      <div style={{flex:1,overflowY:"auto",WebkitOverflowScrolling:"touch",padding:20}}>{children}</div>
+      <div style={{flex:1,minHeight:0,overflowY:"auto",WebkitOverflowScrolling:"touch",
+        overscrollBehavior:"contain",padding:20,paddingBottom:footer?8:20}}>{children}</div>
+      {footer&&(
+        <div style={{flexShrink:0,padding:"12px 20px 4px",borderTop:`1px solid ${V.cardBorder}`,
+          background:"linear-gradient(180deg,#1a1a28,#0e0e16)"}}>{footer}</div>
+      )}
     </div>
   </div>
 );
@@ -771,6 +968,8 @@ function FoodSearch({onAdd}){
   const [q,setQ]=useState("");
   const [cat,setCat]=useState("All");
   const [qty,setQty]=useState({});
+  const [showCustom,setShowCustom]=useState(false);
+  const [custom,setCustom]=useState({name:"",cal:"",protein:"",carbs:"",fat:""});
   const results=useMemo(()=>{
     if(!q&&cat==="All")return FOODS.slice(0,20);
     return FOODS.filter(f=>{const mc=cat==="All"||f.cat===cat;const mq=!q||f.n.toLowerCase().includes(q.toLowerCase());return mc&&mq;}).slice(0,30);
@@ -779,6 +978,12 @@ function FoodSearch({onAdd}){
     const m=parseFloat(qty[food.n])||1;
     onAdd({name:food.n,cal:Math.round(food.cal*m),protein:Math.round(food.p*m),carbs:Math.round(food.c*m),fat:Math.round(food.f*m)});
     setQty(r=>({...r,[food.n]:""}));
+  };
+  const addCustomFood=()=>{
+    if(!custom.name.trim()||!custom.cal)return;
+    onAdd({name:custom.name.trim(),cal:parseInt(custom.cal)||0,protein:parseInt(custom.protein)||0,
+      carbs:parseInt(custom.carbs)||0,fat:parseInt(custom.fat)||0});
+    setCustom({name:"",cal:"",protein:"",carbs:"",fat:""});setShowCustom(false);
   };
   return(
     <div>
@@ -791,7 +996,7 @@ function FoodSearch({onAdd}){
       <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:10}}>
         {FOOD_CATS.map(c=><Chip key={c} label={c} active={cat===c} onClick={()=>setCat(c)}/>)}
       </div>
-      <div style={{maxHeight:280,overflowY:"auto",WebkitOverflowScrolling:"touch"}}>
+      <div style={{maxHeight:220,overflowY:"auto",WebkitOverflowScrolling:"touch"}}>
         {results.map((food,i)=>(
           <div key={i} style={{display:"flex",alignItems:"center",gap:8,padding:"10px 0",borderBottom:"1px solid rgba(255,255,255,0.03)"}}>
             <div style={{flex:1,minWidth:0}}>
@@ -800,7 +1005,7 @@ function FoodSearch({onAdd}){
                 <span style={{color:V.warn}}>{food.cal}</span> · <span style={{color:V.accent}}>{food.p}P</span> · <span style={{color:V.accent2}}>{food.c}C</span> · <span style={{color:V.warn}}>{food.f}F</span>
               </div>
             </div>
-            <input type="number" inputMode="decimal" value={qty[food.n]||""} onChange={e=>setQty(q=>({...q,[food.n]:e.target.value}))}
+            <input type="number" inputMode="decimal" value={qty[food.n]||""} onChange={e=>setQty(q2=>({...q2,[food.n]:e.target.value}))}
               placeholder="1" step="0.5" style={{width:44,padding:"6px 4px",background:"rgba(255,255,255,0.04)",
                 border:`1px solid ${V.cardBorder}`,borderRadius:8,color:V.text,fontSize:12,fontFamily:V.mono,textAlign:"center",outline:"none"}}/>
             <button onClick={()=>addItem(food)} style={{width:36,height:36,borderRadius:10,background:`${V.accent}15`,
@@ -808,8 +1013,44 @@ function FoodSearch({onAdd}){
               {Icons.plus({size:14,color:V.accent})}</button>
           </div>
         ))}
-        {results.length===0&&<div style={{textAlign:"center",padding:20,color:V.text3,fontSize:13}}>No results</div>}
+        {results.length===0&&<div style={{textAlign:"center",padding:16,color:V.text3,fontSize:12}}>No results for "{q}"</div>}
       </div>
+      {/* Custom food entry */}
+      {!showCustom?(
+        <button onClick={()=>setShowCustom(true)} style={{width:"100%",padding:"10px",marginTop:8,
+          background:"rgba(255,255,255,0.02)",border:`1px dashed ${V.cardBorder}`,borderRadius:10,
+          cursor:"pointer",fontSize:11,color:V.accent,fontWeight:600,fontFamily:V.font,
+          WebkitTapHighlightColor:"transparent"}}>
+          + Add Custom Food
+        </button>
+      ):(
+        <div style={{marginTop:8,padding:10,background:"rgba(255,255,255,0.02)",borderRadius:10,border:`1px solid ${V.cardBorder}`}}>
+          <div style={{fontSize:11,fontWeight:700,color:V.text,marginBottom:6}}>Custom Food Entry</div>
+          <input value={custom.name} onChange={e=>setCustom(c=>({...c,name:e.target.value}))} placeholder="Food name *"
+            style={{width:"100%",padding:"8px 10px",background:"rgba(255,255,255,0.04)",border:`1px solid ${V.cardBorder}`,
+              borderRadius:8,color:V.text,fontSize:12,outline:"none",marginBottom:6,boxSizing:"border-box",fontFamily:V.font}}/>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:4,marginBottom:8}}>
+            {[{k:"cal",l:"Cal",u:""},{k:"protein",l:"Prot",u:"g"},{k:"carbs",l:"Carb",u:"g"},{k:"fat",l:"Fat",u:"g"}].map(f=>(
+              <div key={f.k}>
+                <div style={{fontSize:8,color:V.text3,fontWeight:600,marginBottom:2}}>{f.l}</div>
+                <input type="number" inputMode="numeric" value={custom[f.k]} onChange={e=>setCustom(c=>({...c,[f.k]:e.target.value}))}
+                  placeholder="0" style={{width:"100%",padding:"6px 4px",background:"rgba(255,255,255,0.04)",
+                    border:`1px solid ${V.cardBorder}`,borderRadius:6,color:V.text,fontSize:11,fontFamily:V.mono,
+                    textAlign:"center",outline:"none",boxSizing:"border-box"}}/>
+              </div>
+            ))}
+          </div>
+          <div style={{display:"flex",gap:6}}>
+            <button onClick={()=>setShowCustom(false)} style={{flex:1,padding:"7px",borderRadius:8,
+              background:"rgba(255,255,255,0.04)",border:`1px solid ${V.cardBorder}`,cursor:"pointer",
+              fontSize:10,color:V.text3,fontFamily:V.font}}>Cancel</button>
+            <button onClick={addCustomFood} disabled={!custom.name.trim()||!custom.cal}
+              style={{flex:1,padding:"7px",borderRadius:8,background:V.accent,border:"none",cursor:"pointer",
+                fontSize:10,fontWeight:700,color:V.bg,fontFamily:V.font,
+                opacity:(!custom.name.trim()||!custom.cal)?0.4:1}}>Add Food</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -858,23 +1099,30 @@ function BarcodeScanner({onResult,onClose}){
   const startCam=useCallback(async()=>{
     if(!navigator.mediaDevices?.getUserMedia){setStatus("unsupported");return;}
     try{
-      const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment",width:{ideal:1280},height:{ideal:720}}});
+      // Try rear camera, fallback to any camera
+      let stream;
+      try{stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:"environment"},width:{ideal:1280},height:{ideal:720}}});}
+      catch(e1){try{stream=await navigator.mediaDevices.getUserMedia({video:true});}
+        catch(e2){setStatus("unsupported");return;}}
       streamRef.current=stream;
-      if(videoRef.current){videoRef.current.srcObject=stream;await videoRef.current.play();}
+      if(videoRef.current){videoRef.current.srcObject=stream;videoRef.current.setAttribute("playsinline","true");await videoRef.current.play().catch(()=>{});}
       setStatus("scanning");scanningRef.current=true;
-      // Use BarcodeDetector if available
+      // Use BarcodeDetector if available (Chrome Android), otherwise camera stays open for visual ref
       if("BarcodeDetector" in window){
-        const detector=new BarcodeDetector({formats:["ean_13","ean_8","upc_a","upc_e","code_128","code_39"]});
-        const scan=async()=>{
-          if(!scanningRef.current||!videoRef.current)return;
-          try{
-            const barcodes=await detector.detect(videoRef.current);
-            if(barcodes.length>0){stopCam();lookupBarcode(barcodes[0].rawValue);return;}
-          }catch(e){}
-          if(scanningRef.current)requestAnimationFrame(scan);
-        };
-        requestAnimationFrame(scan);
-      }else{setStatus("unsupported");}
+        try{
+          const detector=new BarcodeDetector({formats:["ean_13","ean_8","upc_a","upc_e","code_128","code_39"]});
+          const scan=async()=>{
+            if(!scanningRef.current||!videoRef.current)return;
+            try{
+              const barcodes=await detector.detect(videoRef.current);
+              if(barcodes.length>0){stopCam();lookupBarcode(barcodes[0].rawValue);return;}
+            }catch(e){}
+            if(scanningRef.current)requestAnimationFrame(scan);
+          };
+          requestAnimationFrame(scan);
+        }catch(e){/* BarcodeDetector failed, keep camera open with manual entry */}
+      }
+      // No else — camera stays open, user types barcode manually
     }catch(e){setStatus("unsupported");}
   },[stopCam,lookupBarcode]);
 
@@ -913,7 +1161,9 @@ function BarcodeScanner({onResult,onClose}){
         )}
 
         {status==="scanning"&&(
-          <div style={{fontSize:12,color:V.text3,textAlign:"center"}}>Point camera at barcode</div>
+          <div style={{fontSize:12,color:V.text3,textAlign:"center"}}>
+            {"BarcodeDetector" in window?"Point camera at barcode":"Camera open — read the barcode number and type it below"}
+          </div>
         )}
 
         {status==="loading"&&(
@@ -967,7 +1217,7 @@ function BarcodeScanner({onResult,onClose}){
           <div style={{width:"100%",maxWidth:340}}>
             <Card style={{padding:16}}>
               <div style={{fontSize:14,fontWeight:700,color:V.text,marginBottom:8,textAlign:"center"}}>Enter Barcode Manually</div>
-              <div style={{fontSize:11,color:V.text3,marginBottom:12,textAlign:"center"}}>Camera scanning unavailable. Type or paste the barcode number.</div>
+              <div style={{fontSize:11,color:V.text3,marginBottom:12,textAlign:"center"}}>Camera not available — this may be a permissions issue. Check your browser settings, or type the barcode number below.</div>
               <div style={{display:"flex",gap:8}}>
                 <input value={manualCode} onChange={e=>setManualCode(e.target.value)} placeholder="e.g. 049000042566"
                   inputMode="numeric" style={{flex:1,padding:"12px 14px",background:"rgba(255,255,255,0.04)",
@@ -1184,7 +1434,8 @@ function CheckinModal({s,d,onClose}){
   };
 
   return(
-    <Sheet title="Daily Check-in" onClose={onClose}>
+    <Sheet title="Daily Check-in" onClose={onClose}
+      footer={<Btn full onClick={save}>{Icons.check({size:16,color:V.bg})} Log Check-in</Btn>}>
       <div style={{fontSize:12,color:V.text3,marginBottom:14,lineHeight:1.5}}>
         Quick 30-second check. This powers your readiness score and helps adjust your training.
       </div>
@@ -1195,8 +1446,6 @@ function CheckinModal({s,d,onClose}){
 
       <Field label="Sleep Last Night" type="number" value={sleep} onChange={setSleep} unit="hrs" placeholder="e.g. 7.5" step="0.5"/>
       <Field label="Notes (optional)" value={notes} onChange={setNotes} placeholder="How are you feeling?"/>
-
-      <Btn full onClick={save} s={{marginTop:8}}>{Icons.check({size:16,color:V.bg})} Log Check-in</Btn>
     </Sheet>
   );
 }
@@ -1631,9 +1880,14 @@ function WorkoutTab({s,d}){
   const [catFilter,setCatFilter]=useState("All");
   const [showTemplates,setShowTemplates]=useState(false);
   const [showPlates,setShowPlates]=useState(false);
+  const [showAll,setShowAll]=useState(false);
   const [newPRs,setNewPRs]=useState([]);
   const [startTime,setStartTime]=useState(null);
   const [elapsed,setElapsed]=useState(0);
+  const [valWarnings,setValWarnings]=useState(null);
+  const [confirmDel,setConfirmDel]=useState(null);
+  const [editingId,setEditingId]=useState(null);
+  const [expandedId,setExpandedId]=useState(null);
   const cats=["All",...new Set(s.exercises.map(e=>e.cat))];
   const prs=usePRs(s.workouts,s.exercises);
 
@@ -1690,18 +1944,26 @@ function WorkoutTab({s,d}){
   const rmSet=(ei,si)=>setForm(f=>{const exs=[...f.exercises];exs[ei]={...exs[ei],sets:exs[ei].sets.filter((_,i)=>i!==si)};return{...f,exercises:exs};});
   const rmEx=(ei)=>setForm(f=>({...f,exercises:f.exercises.filter((_,i)=>i!==ei)}));
 
-  const save=()=>{
-    // Auto-fill duration from timer if not manually set
+  const buildWorkout=()=>{
     const dur=parseInt(form.dur)||Math.round(elapsed/60)||0;
-    const w={id:uid(),date:form.date,dur,rating:form.rating,
+    return{id:editingId||uid(),date:form.date,dur,rating:form.rating,
       exercises:form.exercises.map(e=>({...e,sets:e.sets.map(st=>({weight:parseFloat(st.weight)||0,reps:parseInt(st.reps)||0,rpe:parseFloat(st.rpe)||0,done:st.done}))})),
       notes:form.notes};
+  };
+  const save=()=>{
+    const w=buildWorkout();
+    const warnings=validateWorkout(w,s);
+    if(warnings.length>0&&!valWarnings){setValWarnings(warnings);return;}
+    setValWarnings(null);
     const detected=[];
     w.exercises.forEach(ex=>{
       const name=s.exercises.find(e=>e.id===ex.exerciseId)?.name||ex.exerciseId;
       ex.sets.forEach(st=>{const e1rm=calc1RM(st.weight,st.reps);const prev=prs[ex.exerciseId];
         if(st.weight>0&&(!prev||e1rm>prev.e1rm))detected.push({name,weight:st.weight,reps:st.reps,e1rm});});});
-    setNewPRs(detected);d({type:"ADD_W",w});setStartTime(null);
+    setNewPRs(detected);
+    if(editingId){d({type:"EDIT_W",w});setEditingId(null);}
+    else d({type:"ADD_W",w});
+    setStartTime(null);
     if(detected.length===0)setShow(false);
   };
 
@@ -1751,7 +2013,8 @@ function WorkoutTab({s,d}){
       {showPlates&&(<Sheet title="Plate Calculator" onClose={()=>setShowPlates(false)}><PlateCalc/></Sheet>)}
 
       {show&&(
-        <Sheet title="Log Workout" onClose={()=>{setShow(false);setStartTime(null);}}>
+        <Sheet title="Log Workout" onClose={()=>{setShow(false);setStartTime(null);}}
+          footer={<Btn full onClick={save} disabled={form.exercises.length===0}>{Icons.check({size:16,color:V.bg})} Save Workout</Btn>}>
           {/* Live timer + motivation */}
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12,
             padding:"10px 14px",background:`${V.accent}06`,borderRadius:12,border:`1px solid ${V.accent}12`}}>
@@ -1773,19 +2036,11 @@ function WorkoutTab({s,d}){
 
           <div style={{marginBottom:14}}>
             <div style={{fontSize:11,color:V.text3,textTransform:"uppercase",letterSpacing:".08em",marginBottom:6,fontWeight:600}}>Add Exercise</div>
-            <div style={{display:"flex",gap:8}}>
-              <select value={selEx} onChange={e=>setSelEx(e.target.value)}
-                style={{flex:1,padding:"12px 14px",background:"rgba(255,255,255,0.04)",border:`1px solid ${V.cardBorder}`,
-                  borderRadius:12,color:V.text,fontSize:14,outline:"none",minHeight:44,WebkitAppearance:"none"}}>
-                <option value="" style={{background:"#14141f"}}>Select...</option>
-                {s.exercises.filter(e=>catFilter==="All"||e.cat===catFilter).map(e=>(
-                  <option key={e.id} value={e.id} style={{background:"#14141f"}}>{e.name}</option>
-                ))}
-              </select>
-              {selEx&&(()=>{const yt=s.exercises.find(e=>e.id===selEx)?.yt;return yt?<YTBtn yt={yt} size={44}/>:null;})()}
-              <Btn v="small" onClick={addEx} s={{minHeight:44,padding:"0 14px"}}>{Icons.plus({size:16,color:V.accent})}</Btn>
+            <ExercisePicker exercises={s.exercises} value={selEx} onChange={id=>{setSelEx(id);}} catFilter={catFilter} setCatFilter={setCatFilter}/>
+            <div style={{display:"flex",gap:8,marginTop:8}}>
+              {selEx&&(()=>{const yt=s.exercises.find(e=>e.id===selEx)?.yt;return yt?<YTBtn yt={yt} size={38}/>:null;})()}
+              {selEx&&<Btn full onClick={addEx}>{Icons.plus({size:14,color:V.bg})} Add {s.exercises.find(e=>e.id===selEx)?.name||""}</Btn>}
             </div>
-            <div style={{display:"flex",gap:6,marginTop:8,flexWrap:"wrap"}}>{cats.map(c=><Chip key={c} label={c} active={catFilter===c} onClick={()=>setCatFilter(c)}/>)}</div>
           </div>
 
           {form.exercises.map((ex,ei)=>{
@@ -1859,17 +2114,23 @@ function WorkoutTab({s,d}){
           </div>
 
           <Field label="Notes" value={form.notes} onChange={v=>setForm(f=>({...f,notes:v}))} placeholder="How did it feel?"/>
-          <Btn full onClick={save} disabled={form.exercises.length===0} s={{marginTop:12}}>{Icons.check({size:16,color:V.bg})} Save Workout</Btn>
+          {valWarnings&&<ValidationWarning warnings={valWarnings} onConfirm={()=>{setValWarnings(null);save();}} onCancel={()=>setValWarnings(null)}/>}
         </Sheet>
       )}
+
+      {/* Delete confirmation */}
+      {confirmDel&&<ConfirmDialog msg="Delete workout?" detail={`${fmtFull(confirmDel.date)} — this cannot be undone.`}
+        onConfirm={()=>{Undo.set("Workout deleted",confirmDel,"workout");d({type:"DEL_W",id:confirmDel.id});setConfirmDel(null);}}
+        onCancel={()=>setConfirmDel(null)}/>}
 
       {/* History */}
       {s.workouts.length===0?(
         <div style={{textAlign:"center",padding:40,color:V.text3,fontSize:13}}>No workouts yet</div>
-      ):s.workouts.slice(0,15).map(w=>{
-        const vol=w.exercises.reduce((s,e)=>s+e.sets.reduce((ss,st)=>ss+st.weight*st.reps,0),0);
+      ):s.workouts.slice(0,showAll?999:15).map(w=>{
+        const vol=w.exercises.reduce((s2,e)=>s2+e.sets.reduce((ss,st)=>ss+st.weight*st.reps,0),0);
+        const expanded=expandedId===w.id;
         return(
-          <Card key={w.id} style={{padding:14}}>
+          <Card key={w.id} onClick={()=>setExpandedId(expanded?null:w.id)} style={{padding:14,cursor:"pointer"}}>
             <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
               <div style={{display:"flex",alignItems:"center",gap:6}}>
                 <span style={{fontSize:12,color:V.text2}}>{fmtFull(w.date)}</span>
@@ -1877,27 +2138,51 @@ function WorkoutTab({s,d}){
               </div>
               <div style={{display:"flex",alignItems:"center",gap:6}}>
                 <span style={{fontSize:10,color:V.text3}}>{w.dur}min</span>
-                <button onClick={()=>d({type:"DEL_W",id:w.id})} style={{background:"none",border:"none",padding:4,cursor:"pointer"}}>{Icons.trash({size:12,color:V.text3})}</button>
+                <button onClick={e=>{e.stopPropagation();setEditingId(w.id);setForm({date:w.date,dur:w.dur?.toString()||"",exercises:w.exercises,notes:w.notes||"",rating:w.rating||3});setShow(true);}}
+                  aria-label="Edit workout" style={{background:"none",border:"none",padding:4,cursor:"pointer"}}>{Icons.edit?.({size:12,color:V.text3})||<span style={{fontSize:10,color:V.text3}}>✏️</span>}</button>
+                <button onClick={e=>{e.stopPropagation();setConfirmDel(w);}} aria-label="Delete workout"
+                  style={{background:"none",border:"none",padding:4,cursor:"pointer"}}>{Icons.trash({size:12,color:V.text3})}</button>
               </div>
             </div>
             {w.exercises.map((ex,i)=>{
               const exInfo=s.exercises.find(e=>e.id===ex.exerciseId);
               const top=ex.sets.reduce((m,st)=>st.weight>m.weight?st:m,{weight:0,reps:0});
               return(
-                <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 0",
-                  borderBottom:i<w.exercises.length-1?`1px solid rgba(255,255,255,0.03)`:"none"}}>
-                  <div style={{display:"flex",alignItems:"center",gap:5}}>
-                    <span style={{fontSize:12,color:V.text}}>{exInfo?.name||ex.exerciseId}</span>
-                    <YTBtn yt={exInfo?.yt} size={18}/>
+                <div key={i}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 0",
+                    borderBottom:i<w.exercises.length-1?`1px solid rgba(255,255,255,0.03)`:"none"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:5}}>
+                      <span style={{fontSize:12,color:V.text}}>{exInfo?.name||ex.exerciseId}</span>
+                      <YTBtn yt={exInfo?.yt} size={18}/>
+                    </div>
+                    <span style={{fontSize:11,color:V.accent,fontFamily:V.mono}}>{top.weight}×{top.reps} · {ex.sets.length}s</span>
                   </div>
-                  <span style={{fontSize:11,color:V.accent,fontFamily:V.mono}}>{top.weight}×{top.reps} · {ex.sets.length}s</span>
+                  {/* #7 Expanded detail: all sets */}
+                  {expanded&&(
+                    <div style={{padding:"4px 0 8px 12px"}}>
+                      {ex.sets.map((st,si)=>(
+                        <div key={si} style={{display:"flex",gap:8,fontSize:10,color:V.text3,padding:"2px 0"}}>
+                          <span>Set {si+1}:</span>
+                          <span style={{color:V.accent,fontFamily:V.mono}}>{st.weight}×{st.reps}</span>
+                          {st.rpe>0&&<span>RPE {st.rpe}</span>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               );
             })}
-            <div style={{marginTop:4,fontSize:11,color:V.accent2,fontFamily:V.mono,textAlign:"right"}}>{vol.toLocaleString()} lbs</div>
+            <div style={{marginTop:4,fontSize:11,color:V.accent2,fontFamily:V.mono,textAlign:"right"}}>{vol.toLocaleString()} {wUnit(s.units)}</div>
+            {expanded&&w.notes&&<div style={{fontSize:10,color:V.text3,fontStyle:"italic",marginTop:4}}>{w.notes}</div>}
           </Card>
         );
       })}
+      {s.workouts.length>15&&!showAll&&(
+        <button onClick={()=>setShowAll(true)} style={{width:"100%",padding:12,background:"rgba(255,255,255,0.02)",
+          border:`1px solid ${V.cardBorder}`,borderRadius:10,cursor:"pointer",fontSize:11,color:V.accent,fontWeight:600,fontFamily:V.font}}>
+          Show all {s.workouts.length} workouts
+        </button>
+      )}
     </div>
   );
 }
@@ -1912,6 +2197,7 @@ function NutritionTab({s,d}){
     meals:[{name:"Breakfast",items:[]},{name:"Lunch",items:[]},{name:"Dinner",items:[]},{name:"Snacks",items:[]}]});
   const [activeMeal,setActiveMeal]=useState(null);
   const [scanMeal,setScanMeal]=useState(null);
+  const [valWarnings,setValWarnings]=useState(null);
 
   const start=()=>{
     const ex=s.nutrition.find(n=>n.date===today());
@@ -1921,6 +2207,18 @@ function NutritionTab({s,d}){
     else setForm({date:today(),cal:"",protein:"",carbs:"",fat:"",fiber:"",water:"",sleep:"",
       meals:[{name:"Breakfast",items:[]},{name:"Lunch",items:[]},{name:"Dinner",items:[]},{name:"Snacks",items:[]}]});
     setShow(true);
+  };
+
+  // #12 Copy from yesterday
+  const copyYesterday=()=>{
+    const yd=ago(1);
+    const prev=s.nutrition.find(n=>n.date===yd);
+    if(prev){
+      setForm({date:today(),cal:prev.cal.toString(),protein:prev.protein.toString(),carbs:prev.carbs.toString(),
+        fat:prev.fat.toString(),fiber:(prev.fiber||"").toString(),water:(prev.water||"").toString(),sleep:"",
+        meals:prev.meals||[{name:"Breakfast",items:[]},{name:"Lunch",items:[]},{name:"Dinner",items:[]},{name:"Snacks",items:[]}]});
+      setShow(true);
+    }
   };
 
   const addFoodToMeal=(mi,food)=>{setForm(f=>{const m=[...f.meals];m[mi]={...m[mi],items:[...(m[mi].items||[]),food]};return{...f,meals:m};});};
@@ -1933,9 +2231,13 @@ function NutritionTab({s,d}){
   };
 
   const save=()=>{
-    d({type:"ADD_N",n:{id:uid(),date:form.date,cal:parseInt(form.cal)||0,protein:parseInt(form.protein)||0,
+    const n={id:uid(),date:form.date,cal:parseInt(form.cal)||0,protein:parseInt(form.protein)||0,
       carbs:parseInt(form.carbs)||0,fat:parseInt(form.fat)||0,fiber:parseInt(form.fiber)||0,
-      water:parseInt(form.water)||0,sleep:parseFloat(form.sleep)||0,meals:form.meals}});
+      water:parseInt(form.water)||0,sleep:parseFloat(form.sleep)||0,meals:form.meals};
+    const warnings=validateNutrition(n);
+    if(warnings.length>0&&!valWarnings){setValWarnings(warnings);return;}
+    setValWarnings(null);
+    d({type:"ADD_N",n});
     setShow(false);
   };
 
@@ -1951,7 +2253,12 @@ function NutritionTab({s,d}){
 
   return(
     <div style={{display:"flex",flexDirection:"column",gap:12}}>
-      <Btn full onClick={start}>{Icons.plus({size:16,color:V.bg})} Log Nutrition</Btn>
+      <div style={{display:"flex",gap:8}}>
+        <Btn full onClick={start}>{Icons.plus({size:16,color:V.bg})} Log Nutrition</Btn>
+        {s.nutrition.find(n=>n.date===ago(1))&&(
+          <Btn v="secondary" onClick={copyYesterday} s={{flexShrink:0,fontSize:11}}>{Icons.copy({size:14,color:V.text2})} Copy Yesterday</Btn>
+        )}
+      </div>
 
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
         <Stat icon={Icons.flame} label="Avg Calories" value={avgCal} unit="kcal" color={V.warn}/>
@@ -1974,7 +2281,8 @@ function NutritionTab({s,d}){
       </Card>
 
       {show&&(
-        <Sheet title="Log Nutrition" onClose={()=>setShow(false)}>
+        <Sheet title="Log Nutrition" onClose={()=>setShow(false)}
+          footer={<Btn full onClick={save}>{Icons.check({size:16,color:V.bg})} Save Nutrition</Btn>}>
           <Field label="Date" type="date" value={form.date} onChange={v=>setForm(f=>({...f,date:v}))}/>
 
           {/* Meals with food database search */}
@@ -2023,8 +2331,6 @@ function NutritionTab({s,d}){
             <Field label="Water" type="number" value={form.water} onChange={v=>setForm(f=>({...f,water:v}))} unit="cups"/>
             <Field label="Sleep" type="number" value={form.sleep} onChange={v=>setForm(f=>({...f,sleep:v}))} unit="hrs" step="0.5"/>
           </div>
-
-          <Btn full onClick={save} s={{marginTop:12}}>{Icons.check({size:16,color:V.bg})} Save Nutrition</Btn>
         </Sheet>
       )}
 
@@ -2086,7 +2392,7 @@ function BodyTab({s,d}){
       </Btn>
 
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-        <Stat icon={Icons.scale} label="Weight" value={latest?.weight.toFixed(1)||"—"} unit="lbs" color={V.purple}
+        <Stat icon={Icons.scale} label="Weight" value={latest?.weight.toFixed(1)||"—"} unit={wUnit(s.units)} color={V.purple}
           sub={wc!==0?`${wc>0?"+":""}${wc.toFixed(1)} lbs`:undefined}/>
         <Stat icon={Icons.activity} label="Body Fat" value={latest?.bf.toFixed(1)||"—"} unit="%" color={V.danger}/>
       </div>
@@ -2122,7 +2428,8 @@ function BodyTab({s,d}){
       )}
 
       {show&&(
-        <Sheet title="Log Measurement" onClose={()=>setShow(false)}>
+        <Sheet title="Log Measurement" onClose={()=>setShow(false)}
+          footer={<Btn full onClick={save}>{Icons.check({size:16,color:V.bg})} Save Measurement</Btn>}>
           <Field label="Date" type="date" value={form.date} onChange={v=>setForm(f=>({...f,date:v}))}/>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
             <Field label="Weight" type="number" value={form.weight} onChange={v=>setForm(f=>({...f,weight:v}))} unit="lbs" step="0.1"/>
@@ -2132,7 +2439,6 @@ function BodyTab({s,d}){
             <Field label="Arms" type="number" value={form.arms} onChange={v=>setForm(f=>({...f,arms:v}))} unit="in" step="0.1"/>
             <Field label="Thighs" type="number" value={form.thighs} onChange={v=>setForm(f=>({...f,thighs:v}))} unit="in" step="0.1"/>
           </div>
-          <Btn full onClick={save} s={{marginTop:12}}>{Icons.check({size:16,color:V.bg})} Save Nutrition</Btn>
         </Sheet>
       )}
 
@@ -2649,6 +2955,7 @@ function SettingsTab({s,d}){
   const [newEx,setNewEx]=useState("");
   const [newCat,setNewCat]=useState("Chest");
   const [newYt,setNewYt]=useState("");
+  const [exLibFilter,setExLibFilter]=useState(null);
   const [confirmClear,setConfirmClear]=useState(false);
   const [open,setOpen]=useState(null);
   const [legalView,setLegalView]=useState(null);
@@ -2660,11 +2967,14 @@ function SettingsTab({s,d}){
   };
 
   const addEx=()=>{
-    if(!newEx)return;
+    if(!newEx.trim())return;
     let ytId=newYt.trim();
+    if(!ytId.includes("youtu"))return; // YouTube required
     if(ytId.includes("youtube.com/watch")){try{ytId=new URL(ytId).searchParams.get("v")||"";}catch(e){}}
     else if(ytId.includes("youtu.be/")){ytId=ytId.split("youtu.be/")[1]?.split(/[?&]/)[0]||"";}
-    d({type:"ADD_EX",ex:{id:uid(),name:newEx,cat:newCat,...(ytId?{yt:ytId}:{})}});
+    else if(ytId.includes("youtube.com/shorts/")){ytId=ytId.split("shorts/")[1]?.split(/[?&]/)[0]||"";}
+    if(!ytId)return;
+    d({type:"ADD_EX",ex:{id:uid(),name:newEx.trim(),cat:newCat,yt:ytId}});
     setNewEx("");setNewYt("");
   };
 
@@ -2755,16 +3065,63 @@ function SettingsTab({s,d}){
       </Row>
 
       {/* Custom Exercise — expandable */}
-      <Row id="exercise" icon={Icons.plus({size:16,color:V.accent})} label="Add Exercise"
-        desc={`${s.exercises.length} exercises in library`}>
-        <Field label="Name" value={newEx} onChange={setNewEx} placeholder="e.g. Bulgarian Split Squat"/>
-        <Field label="YouTube (optional)" value={newYt} onChange={setNewYt} placeholder="Video URL or ID"/>
-        <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:10}}>
-          {["Chest","Back","Legs","Shoulders","Arms","Core","Cardio"].map(c=>(
-            <Chip key={c} label={c} active={newCat===c} onClick={()=>setNewCat(c)}/>
+      <Row id="exercise" icon={Icons.plus({size:16,color:V.accent})} label="Exercise Library"
+        desc={`${s.exercises.length} exercises`}>
+        {/* Add new exercise form */}
+        <div style={{padding:12,background:"rgba(255,255,255,0.02)",borderRadius:12,border:`1px solid ${V.cardBorder}`,marginBottom:12}}>
+          <div style={{fontSize:12,fontWeight:700,color:V.text,marginBottom:8}}>Add New Exercise</div>
+          <Field label="Exercise Name *" value={newEx} onChange={setNewEx} placeholder="e.g. Bulgarian Split Squat"/>
+          <div style={{fontSize:10,fontWeight:600,color:V.text3,marginBottom:4}}>Muscle Group *</div>
+          <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:10}}>
+            {["Chest","Back","Legs","Shoulders","Arms","Core","Cardio"].map(c=>(
+              <Chip key={c} label={c} active={newCat===c} onClick={()=>setNewCat(c)}/>
+            ))}
+          </div>
+          <Field label="YouTube Video URL *" value={newYt} onChange={setNewYt} placeholder="https://youtube.com/watch?v=..."/>
+          {newYt&&!newYt.includes("youtu")&&(
+            <div style={{fontSize:9,color:V.danger,marginTop:-6,marginBottom:6}}>Please enter a valid YouTube URL</div>
+          )}
+          <Btn full onClick={addEx} disabled={!newEx.trim()||!newYt.includes("youtu")}>
+            {Icons.plus({size:14,color:V.bg})} Add Exercise
+          </Btn>
+          {!newEx&&!newYt&&(
+            <div style={{fontSize:9,color:V.text3,marginTop:6,textAlign:"center"}}>All fields are required including a YouTube form video</div>
+          )}
+        </div>
+        {/* Exercise library table */}
+        <div style={{fontSize:12,fontWeight:700,color:V.text,marginBottom:6}}>Current Library</div>
+        <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:8}}>
+          {["All","Chest","Back","Legs","Shoulders","Arms","Core","Cardio"].map(c=>(
+            <Chip key={c} label={c} active={(exLibFilter||"All")===c} onClick={()=>setExLibFilter(c==="All"?null:c)}/>
           ))}
         </div>
-        <Btn full onClick={addEx}>{Icons.plus({size:14,color:V.bg})} Add</Btn>
+        <div style={{maxHeight:300,overflowY:"auto",WebkitOverflowScrolling:"touch",borderRadius:10,border:`1px solid ${V.cardBorder}`}}>
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+            <thead>
+              <tr style={{background:"rgba(255,255,255,0.03)",position:"sticky",top:0}}>
+                <th style={{padding:"8px 10px",textAlign:"left",color:V.text3,fontWeight:600,borderBottom:`1px solid ${V.cardBorder}`}}>Exercise</th>
+                <th style={{padding:"8px 6px",textAlign:"left",color:V.text3,fontWeight:600,borderBottom:`1px solid ${V.cardBorder}`}}>Group</th>
+                <th style={{padding:"8px 6px",textAlign:"center",color:V.text3,fontWeight:600,borderBottom:`1px solid ${V.cardBorder}`}}>Video</th>
+              </tr>
+            </thead>
+            <tbody>
+              {s.exercises.filter(e=>!exLibFilter||e.cat===exLibFilter).map(ex=>(
+                <tr key={ex.id} style={{borderBottom:`1px solid rgba(255,255,255,0.02)`}}>
+                  <td style={{padding:"6px 10px",color:V.text}}>{ex.name}</td>
+                  <td style={{padding:"6px",color:V.text3}}>{ex.cat}</td>
+                  <td style={{padding:"6px",textAlign:"center"}}>
+                    {ex.yt?(
+                      <a href={`https://youtube.com/watch?v=${ex.yt}`} target="_blank" rel="noopener"
+                        style={{fontSize:10,color:V.accent,textDecoration:"none",fontWeight:600}}>Watch</a>
+                    ):(
+                      <span style={{fontSize:9,color:V.text3}}>—</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </Row>
 
       {/* Backup — expandable */}
@@ -5196,7 +5553,7 @@ function WeeklySummary({s}){
 
     const rows=[
       {l:"WORKOUTS",v:String(stats.workouts),sub:"/7 days"},
-      {l:"VOLUME",v:stats.totalVol>1000?`${(stats.totalVol/1000).toFixed(1)}k`:""+stats.totalVol,sub:"total lbs"},
+      {l:"VOLUME",v:stats.totalVol>1000?`${(stats.totalVol/1000).toFixed(1)}k`:""+stats.totalVol,sub:`total ${wUnit(s.units)}`},
       {l:"AVG CALORIES",v:String(stats.avgCal),sub:"kcal/day"},
       {l:"AVG PROTEIN",v:`${stats.avgProt}g`,sub:`hit ${stats.protHit}/7 days`},
       {l:"AVG SLEEP",v:`${stats.avgSleep}h`,sub:"per night"},
@@ -5369,13 +5726,18 @@ function App(){
     if(contentRef.current)contentRef.current.scrollTop=0;
   },[s.tab]);
 
+  // #10 Track visits on app launch (separate from install prompt)
+  useEffect(()=>{
+    const v=parseInt(LS.get("ft-visits")||"0")+1;
+    LS.set("ft-visits",v);
+    LS.set("ft-platform",/iPhone|iPad/.test(navigator.userAgent)?"ios":/Android/.test(navigator.userAgent)?"android":"desktop");
+  },[]);
+
   // Capture beforeinstallprompt for smart install banner
   useEffect(()=>{
     const handler=(e)=>{e.preventDefault();setInstallPrompt(e);
-      // Show banner if user hasn't dismissed and has used app 3+ times
-      const visits=parseInt(LS.get("ft-visits")||"0")+1;
-      LS.set("ft-visits",visits);
-      if(visits>=3&&!LS.get("ft-install-dismissed"))setShowInstallBanner(true);
+      LS.set("ft-install-shown",true);
+      if(parseInt(LS.get("ft-visits")||"0")>=3&&!LS.get("ft-install-dismissed"))setShowInstallBanner(true);
     };
     window.addEventListener("beforeinstallprompt",handler);
     return()=>window.removeEventListener("beforeinstallprompt",handler);
@@ -5457,12 +5819,15 @@ function App(){
     return()=>navigator.serviceWorker?.removeEventListener("message",handler);
   },[]);
 
-  // Reminder notifications with action buttons
+  // Reminder notifications with action buttons + #8 quiet hours
   useEffect(()=>{
     if(!s.loaded||!s.onboarded||!LS.get("ft-reminders"))return;
     const lastReminder=LS.get("ft-last-reminder");
     const td=today();
     if(lastReminder===td)return;
+    // #8 Quiet hours (10pm-7am)
+    const hr=new Date().getHours();
+    if(hr>=22||hr<7)return;
     LS.set("ft-last-reminder",td);
     const dow=new Date().getDay();
     const todayType=s.schedule.overrides[td]||s.schedule.weekly[dow]||"Rest";
@@ -5690,12 +6055,13 @@ function App(){
           );
         })}
       </div>
+      <UndoToast d={d}/>
     </div>
   );
 }
 
 // ─── Mount ───
-ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(ErrorBoundary,null,React.createElement(App)));
 
 </script>
 
