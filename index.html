@@ -11,6 +11,7 @@
 <title>IRONLOG</title>
 <link rel="manifest" href="./manifest.json"/>
 <link rel="apple-touch-icon" href="./icon.svg"/>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet"/>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body,#root{height:100%;width:100%;background:#08080d;overflow:hidden}
@@ -19,40 +20,112 @@ input,select,button{font-family:inherit}
 input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
 input[type=number]{-moz-appearance:textfield}
 ::-webkit-scrollbar{width:3px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.08);border-radius:3px}
-@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+#loader{position:fixed;inset:0;background:#08080d;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:9999;transition:opacity .4s}
+#loader.done{opacity:0;pointer-events:none}
+#loader .spin{width:36px;height:36px;border:3px solid rgba(0,245,160,0.15);border-top-color:#00f5a0;border-radius:50%;animation:spin .8s linear infinite}
+#loader .msg{margin-top:16px;font-size:13px;color:#8b8b9e;font-family:'Outfit',sans-serif}
+#loader .err{margin-top:16px;font-size:12px;color:#ff6b6b;font-family:'JetBrains Mono',monospace;max-width:90%;text-align:center;word-break:break-all}
+@keyframes spin{to{transform:rotate(360deg)}}
 </style>
-<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet"/>
-<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js';"></script>
-<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js';"></script>
-<script src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/recharts@2.12.7/umd/Recharts.min.js';"></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js" onerror="this.onerror=null;this.src='https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.26.3/babel.min.js';"></script>
 </head>
 <body>
+<div id="loader"><div class="spin"></div><div class="msg">Loading IRONLOG...</div></div>
 <div id="root"></div>
+
 <script>
-window.addEventListener('DOMContentLoaded',()=>{
-  const root=document.getElementById('root');
-  if(root){
-    root.innerHTML='<div style="padding:24px;font-family:Outfit,sans-serif;color:#d1d5db">Loading IRONLOG…</div>';
-  }
-  setTimeout(()=>{
-    if(root && !root.dataset.appMounted){
-      root.innerHTML='<div style="padding:24px;font-family:Outfit,sans-serif;color:#fca5a5;line-height:1.5"><h2 style="margin-bottom:8px;color:#fecaca">IRONLOG failed to load</h2><p>One or more CDN scripts were blocked or failed to download.</p><p style="margin-top:8px">Try refreshing, disabling strict content blockers, or opening with a stronger connection.</p></div>';
-    }
-  },7000);
-});
-</script>
-<script type="text/babel" data-type="module">
-if(!window.React || !window.ReactDOM || !window.Recharts){
-  const root=document.getElementById('root');
-  if(root){
-    root.innerHTML='<div style="padding:24px;font-family:Outfit,sans-serif;color:#fca5a5">Missing required scripts (React / ReactDOM / Recharts).</div>';
-  }
-  throw new Error('Missing required CDN dependencies.');
+// ─── Script loader with error handling ───
+var loadStatus = {};
+function loadScript(url, name) {
+  return new Promise(function(resolve, reject) {
+    var s = document.createElement('script');
+    s.src = url;
+    s.crossOrigin = 'anonymous';
+    s.onload = function() { loadStatus[name] = 'ok'; resolve(); };
+    s.onerror = function() { loadStatus[name] = 'FAILED'; reject(new Error(name + ' failed to load from ' + url)); };
+    document.head.appendChild(s);
+  });
 }
 
+function showError(msg) {
+  var loader = document.getElementById('loader');
+  loader.innerHTML = '<div style="color:#ff6b6b;font-size:16px;font-weight:700;margin-bottom:12px">Failed to Load</div>' +
+    '<div class="err">' + msg + '</div>' +
+    '<div style="margin-top:20px;font-size:12px;color:#8b8b9e">Check your internet connection and reload</div>';
+}
+
+function updateMsg(msg) {
+  var el = document.querySelector('#loader .msg');
+  if (el) el.textContent = msg;
+}
+
+// Load scripts sequentially to guarantee order
+updateMsg('Loading React...');
+loadScript('https://unpkg.com/react@18/umd/react.production.min.js', 'React')
+.then(function() {
+  updateMsg('Loading React DOM...');
+  return loadScript('https://unpkg.com/react-dom@18/umd/react-dom.production.min.js', 'ReactDOM');
+})
+.then(function() {
+  updateMsg('Loading Charts...');
+  return loadScript('https://unpkg.com/recharts@2.12.7/umd/Recharts.js', 'Recharts');
+})
+.then(function() {
+  updateMsg('Loading Compiler...');
+  return loadScript('https://unpkg.com/@babel/standalone@7.24.0/babel.min.js', 'Babel');
+})
+.then(function() {
+  updateMsg('Starting app...');
+  // Verify globals exist
+  if (typeof React === 'undefined') throw new Error('React not defined');
+  if (typeof ReactDOM === 'undefined') throw new Error('ReactDOM not defined');
+  if (typeof Recharts === 'undefined') throw new Error('Recharts not defined');
+  if (typeof Babel === 'undefined') throw new Error('Babel not defined');
+
+  // Get the app source
+  var appScript = document.getElementById('app-source');
+  if (!appScript) throw new Error('App source not found');
+
+  // Transpile JSX to JS
+  var jsxCode = appScript.textContent;
+  var compiled;
+  try {
+    compiled = Babel.transform(jsxCode, {
+      presets: [['react', { runtime: 'classic' }]],
+      filename: 'app.jsx'
+    }).code;
+  } catch(e) {
+    throw new Error('Babel compile error: ' + e.message);
+  }
+
+  // Execute compiled JS
+  try {
+    var fn = new Function(compiled);
+    fn();
+  } catch(e) {
+    throw new Error('Runtime error: ' + e.message);
+  }
+
+  // Hide loader
+  setTimeout(function() {
+    document.getElementById('loader').classList.add('done');
+    setTimeout(function() { document.getElementById('loader').style.display = 'none'; }, 500);
+  }, 200);
+})
+.catch(function(err) {
+  console.error('IRONLOG Load Error:', err);
+  showError(err.message || 'Unknown error');
+});
+</script>
+
+<script type="text/plain" id="app-source">
 const {useState,useEffect,useReducer,useMemo,useRef,useCallback}=React;
 const {LineChart,Line,AreaChart,Area,BarChart,Bar,XAxis,YAxis,CartesianGrid,Tooltip,ResponsiveContainer,PieChart,Pie,Cell}=Recharts;
+
+// ─── localStorage persistence ───
+const LS={
+  get:(k)=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):null;}catch(e){return null;}},
+  set:(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}},
+};
 
 
 // ─── Icons (inline SVG for mobile perf) ───
@@ -1834,7 +1907,6 @@ function App(){
   useEffect(()=>{
     (async()=>{
       try{
-        const keys=null;
         const data={};
         ["ft-w","ft-n","ft-b","ft-ex","ft-g","ft-sched"].forEach(k=>{const v=LS.get(k);if(v)data[k]=v;});
         d({type:"INIT",p:{workouts:data["ft-w"]||[],nutrition:data["ft-n"]||[],body:data["ft-b"]||[],
@@ -1935,10 +2007,9 @@ function App(){
 
 // ─── Mount ───
 ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
-document.getElementById('root').dataset.appMounted='1';
+
 </script>
-<script>
-if('serviceWorker' in navigator){navigator.serviceWorker.register('./sw.js').catch(()=>{});}
-</script>
+
+<script>if('serviceWorker' in navigator){navigator.serviceWorker.register('./sw.js').catch(function(){});}</script>
 </body>
 </html>
