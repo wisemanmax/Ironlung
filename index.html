@@ -3246,8 +3246,26 @@ function SettingsTab({s,d}){
             if("Notification" in window){
               const perm=await Notification.requestPermission();
               if(perm==="granted"){
-                new Notification("IRONLOG",{body:"Reminders enabled! You'll get nudges on workout days.",icon:"./icon.svg"});
                 LS.set("ft-reminders",true);
+                LS.set("ft-push-subscribed",false); // Reset to trigger subscription
+                SuccessToastCtrl.show("Notifications enabled");
+                // Trigger Web Push subscription immediately
+                if("serviceWorker" in navigator&&"PushManager" in window){
+                  try{
+                    const reg=await navigator.serviceWorker.ready;
+                    let sub=await reg.pushManager.getSubscription();
+                    if(!sub){
+                      const vapidKey="BMZyIUQO08nuR7afvqNIWBK_ZOcr7PHwT2YwIxTa_ONwAD1YCaJ8Qkb4q4TTYSx_sTN-7-5vCzR8ApNZuyg-Ttc";
+                      const keyBytes=Uint8Array.from(atob(vapidKey.replace(/-/g,'+').replace(/_/g,'/')),c=>c.charCodeAt(0));
+                      sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:keyBytes});
+                    }
+                    await fetch(`${SYNC_URL}/api/push/subscribe`,{
+                      method:"POST",headers:AuthToken.getHeaders(s.profile?.email||""),
+                      body:JSON.stringify({email:s.profile?.email||"",subscription:sub.toJSON()})
+                    });
+                    LS.set("ft-push-subscribed",true);
+                  }catch(e){console.warn("Push subscribe failed:",e);}
+                }
               }
             }else{alert("Notifications not supported in this browser.");}
           }}>{Icons.activity({size:14,color:V.bg})} Enable Notifications</Btn>
@@ -3495,7 +3513,36 @@ function Onboarding({d}){
     setSending(false);
   };
 
-  const profileValid=profile.firstName.trim()&&profile.lastName.trim()&&profile.email.trim()&&profile.dob&&profile.sex&&profile.state&&agreed;
+  // ─── Onboarding Validation ───
+  const BLOCKED_WORDS=["fuck","shit","ass","bitch","dick","pussy","cunt","damn","cock","porn",
+    "nigger","nigga","faggot","retard","whore","slut","bastard","penis","vagina","nazi","kill","rape"];
+  const containsProfanity=(text)=>{
+    const lower=(text||"").toLowerCase().replace(/[^a-z]/g,"");
+    return BLOCKED_WORDS.some(w=>lower.includes(w));
+  };
+  const isValidEmail=(email)=>/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email);
+  const getAge=(dob)=>{
+    if(!dob)return 0;
+    const birth=new Date(dob+"T00:00:00");
+    const now=new Date();
+    let age=now.getFullYear()-birth.getFullYear();
+    if(now.getMonth()<birth.getMonth()||(now.getMonth()===birth.getMonth()&&now.getDate()<birth.getDate()))age--;
+    return age;
+  };
+
+  const nameClean=!containsProfanity(profile.firstName)&&!containsProfanity(profile.lastName)&&!containsProfanity(profile.nickname);
+  const emailValid=isValidEmail(profile.email);
+  const ageValid=getAge(profile.dob)>=13;
+  const profileValid=profile.firstName.trim()&&profile.lastName.trim()&&profile.email.trim()&&profile.dob&&profile.sex&&profile.state&&agreed&&nameClean&&emailValid&&ageValid;
+
+  const getValidationMsg=()=>{
+    if(!agreed)return"Please agree to the Terms of Service and Privacy Policy";
+    if(!profile.firstName.trim()||!profile.lastName.trim()||!profile.email.trim()||!profile.dob||!profile.sex||!profile.state)return"Please fill in all required fields (*)";
+    if(!nameClean)return"Please use appropriate names";
+    if(!emailValid)return"Please enter a valid email address";
+    if(!ageValid)return"You must be at least 13 years old to use IRONLOG";
+    return"";
+  };
 
   const steps=[
     // Step 0: Welcome
@@ -3693,8 +3740,8 @@ function Onboarding({d}){
         </Btn>
 
         {!profileValid&&(
-          <div style={{fontSize:11,color:V.text3,textAlign:"center",marginTop:8}}>
-            {!agreed?"Please agree to the Terms of Service and Privacy Policy":"Please fill in all required fields (*)"}
+          <div style={{fontSize:11,color:!nameClean||!ageValid?V.danger:V.text3,textAlign:"center",marginTop:8}}>
+            {getValidationMsg()}
           </div>
         )}
       </div>
@@ -6142,31 +6189,27 @@ function App(){
   useEffect(()=>{
     if(!s.loaded||!s.onboarded||!s.profile?.email)return;
     if(!("serviceWorker" in navigator)||!("PushManager" in window))return;
-    // Only subscribe once
+    if(!LS.get("ft-reminders"))return; // Only subscribe if notifications enabled
     if(LS.get("ft-push-subscribed"))return;
 
     navigator.serviceWorker.ready.then(async(reg)=>{
       try{
-        // Check if already subscribed
-        const existing=await reg.pushManager.getSubscription();
-        if(existing){LS.set("ft-push-subscribed",true);return;}
-
-        // Subscribe with VAPID key (you'll set this up)
-        const vapidKey="BMZyIUQO08nuR7afvqNIWBK_ZOcr7PHwT2YwIxTa_ONwAD1YCaJ8Qkb4q4TTYSx_sTN-7-5vCzR8ApNZuyg-Ttc";
-
-        const sub=await reg.pushManager.subscribe({
-          userVisibleOnly:true,
-          applicationServerKey:Uint8Array.from(atob(vapidKey),c=>c.charCodeAt(0)),
-        });
-
+        let sub=await reg.pushManager.getSubscription();
+        if(!sub){
+          const vapidKey="BMZyIUQO08nuR7afvqNIWBK_ZOcr7PHwT2YwIxTa_ONwAD1YCaJ8Qkb4q4TTYSx_sTN-7-5vCzR8ApNZuyg-Ttc";
+          // Convert base64url to standard base64 for atob
+          const keyBytes=Uint8Array.from(atob(vapidKey.replace(/-/g,'+').replace(/_/g,'/')),c=>c.charCodeAt(0));
+          sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:keyBytes});
+        }
         // Send subscription to backend
-        await fetch(`${SYNC_URL}/api/push/subscribe`,{
+        const res=await fetch(`${SYNC_URL}/api/push/subscribe`,{
           method:"POST",
           headers:AuthToken.getHeaders(s.profile.email),
           body:JSON.stringify({email:s.profile.email,subscription:sub.toJSON()}),
         });
-        LS.set("ft-push-subscribed",true);
-      }catch(e){/* Push subscription not supported or denied */}
+        if(res.ok)LS.set("ft-push-subscribed",true);
+        else console.warn("Push subscribe response:",await res.text());
+      }catch(e){console.warn("Web Push subscription failed:",e.message||e);}
     });
   },[s.loaded,s.onboarded]);
 
