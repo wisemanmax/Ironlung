@@ -163,6 +163,7 @@ const CloudSync={
           nutrition:state.nutrition||[],
           body:state.body||[],
           photos:(state.photos||[]).filter(p=>!p.data||p.data.length<500000),
+          checkins:state.checkins||[],
           settings:{
             goals:state.goals,
             schedule:state.schedule,
@@ -503,7 +504,7 @@ const defaultSchedule = {
 };
 const init={tab:"home",workouts:[],nutrition:[],body:[],exercises:defaultExercises,
   goals:{cal:2400,protein:180,carbs:250,fat:70,goalWeight:175},schedule:defaultSchedule,
-  range:30,loaded:false,modal:null,units:"lbs",onboarded:false,photos:[],
+  range:30,loaded:false,modal:null,units:"lbs",onboarded:false,photos:[],checkins:[],milestones:[],
   profile:{firstName:"",lastName:"",nickname:"",email:"",dob:"",sex:"",state:"",
     height:"",fitnessLevel:"",activityLevel:"",weeklyAvailability:""}};
 
@@ -531,6 +532,8 @@ function reducer(s,a){
     case "UNITS": return{...s,units:a.u};
     case "ONBOARDED": return{...s,onboarded:true};
     case "SET_PROFILE": return{...s,profile:{...(s.profile||{}),...a.profile}};
+    case "ADD_CHECKIN": return{...s,checkins:[a.c,...(s.checkins||[]).filter(c=>c.date!==a.c.date)]};
+    case "SET_MILESTONES": return{...s,milestones:a.milestones||[]};
     case "ADD_PHOTO": return{...s,photos:[a.photo,...s.photos]};
     case "DEL_PHOTO": return{...s,photos:s.photos.filter(p=>p.id!==a.id)};
     case "CLEAR_ALL": return{...init,exercises:defaultExercises,loaded:true,onboarded:true,units:s.units,profile:s.profile};
@@ -1007,10 +1010,292 @@ function findLastSets(exerciseId,workouts){
   return null;
 }
 
+// ─── Readiness Score Engine ───
+function calcReadiness(s){
+  const td=today();
+  const checkin=(s.checkins||[]).find(c=>c.date===td);
+  const tn=s.nutrition.find(n=>n.date===td)||s.nutrition.find(n=>n.date===ago(1));
+  const lastW=s.workouts[0]; // most recent workout
+  const recentW=s.workouts.filter(w=>w.date>=ago(7));
+  const prevWeekW=s.workouts.filter(w=>w.date>=ago(14)&&w.date<ago(7));
+
+  let score=50; // baseline
+  const factors=[];
+
+  // 1. Sleep quality (0-25 pts) — from nutrition log or check-in
+  const sleep=checkin?.sleep||tn?.sleep||0;
+  if(sleep>0){
+    if(sleep>=7.5){score+=25;factors.push({label:"Great sleep",val:`${sleep.toFixed(1)}h`,color:V.accent,pts:25});}
+    else if(sleep>=6.5){score+=18;factors.push({label:"Decent sleep",val:`${sleep.toFixed(1)}h`,color:V.warn,pts:18});}
+    else if(sleep>=5){score+=8;factors.push({label:"Low sleep",val:`${sleep.toFixed(1)}h`,color:V.danger,pts:8});}
+    else{score+=0;factors.push({label:"Poor sleep",val:`${sleep.toFixed(1)}h`,color:V.danger,pts:0});}
+  }
+
+  // 2. Recovery time (0-15 pts) — days since last workout
+  if(lastW){
+    const daysSince=Math.floor((new Date(td)-new Date(lastW.date))/(86400000));
+    if(daysSince===0){score+=5;factors.push({label:"Trained today",val:"0d rest",color:V.text3,pts:5});}
+    else if(daysSince===1){score+=12;factors.push({label:"1 day rest",val:"Fresh",color:V.accent,pts:12});}
+    else if(daysSince===2){score+=15;factors.push({label:"2 days rest",val:"Recovered",color:V.accent,pts:15});}
+    else if(daysSince<=4){score+=10;factors.push({label:`${daysSince}d rest`,val:"Rested",color:V.accent2,pts:10});}
+    else{score+=5;factors.push({label:`${daysSince}d rest`,val:"Detraining",color:V.warn,pts:5});}
+  }
+
+  // 3. Last workout intensity (0-10 pts) — lower intensity = more recovery
+  if(lastW){
+    const avgRPE=lastW.exercises.reduce((sum,ex)=>{
+      const rpes=ex.sets.filter(st=>st.rpe).map(st=>st.rpe);
+      return sum+(rpes.length?rpes.reduce((a,b)=>a+b,0)/rpes.length:7);
+    },0)/(lastW.exercises.length||1);
+    if(avgRPE<=7){score+=10;factors.push({label:"Low last intensity",val:`RPE ${avgRPE.toFixed(1)}`,color:V.accent,pts:10});}
+    else if(avgRPE<=8.5){score+=6;factors.push({label:"Moderate intensity",val:`RPE ${avgRPE.toFixed(1)}`,color:V.warn,pts:6});}
+    else{score+=2;factors.push({label:"High last intensity",val:`RPE ${avgRPE.toFixed(1)}`,color:V.danger,pts:2});}
+  }
+
+  // 4. Training volume trend (-10 to +10) — overreaching detection
+  if(recentW.length>0&&prevWeekW.length>0){
+    const thisVol=recentW.reduce((s2,w)=>s2+w.exercises.reduce((es,ex)=>es+ex.sets.reduce((ss,st)=>ss+st.weight*st.reps,0),0),0);
+    const lastVol=prevWeekW.reduce((s2,w)=>s2+w.exercises.reduce((es,ex)=>es+ex.sets.reduce((ss,st)=>ss+st.weight*st.reps,0),0),0);
+    const ratio=lastVol>0?thisVol/lastVol:1;
+    if(ratio>1.3){score-=10;factors.push({label:"Volume spike",val:`+${Math.round((ratio-1)*100)}%`,color:V.danger,pts:-10});}
+    else if(ratio>1.1){score-=3;factors.push({label:"Volume up",val:`+${Math.round((ratio-1)*100)}%`,color:V.warn,pts:-3});}
+    else if(ratio>=0.8){score+=5;factors.push({label:"Steady volume",val:"Balanced",color:V.accent,pts:5});}
+    else{score+=0;factors.push({label:"Low volume",val:`${Math.round((ratio-1)*100)}%`,color:V.text3,pts:0});}
+  }
+
+  // 5. Self-report from check-in (0-20 pts)
+  if(checkin){
+    const avg=(checkin.soreness+checkin.energy+checkin.motivation)/3;
+    const pts=Math.round(avg*4); // 1-5 scale → 4-20 pts
+    score+=pts;
+    const labels=["","Rough","Fair","Okay","Good","Excellent"];
+    factors.push({label:"Self-report",val:labels[Math.round(avg)]||"--",color:avg>=4?V.accent:avg>=3?V.warn:V.danger,pts});
+  }
+
+  // 6. Nutrition adherence (+5 bonus)
+  if(tn&&s.goals){
+    const protPct=tn.protein/s.goals.protein;
+    if(protPct>=0.8){score+=5;factors.push({label:"Protein on track",val:`${Math.round(protPct*100)}%`,color:V.accent,pts:5});}
+  }
+
+  score=Math.max(0,Math.min(100,score));
+
+  // Determine readiness level + recommendation
+  let level,color,rec;
+  if(score>=80){level="Peak";color=V.accent;rec="Full intensity. Push for PRs.";}
+  else if(score>=60){level="Ready";color=V.accent2;rec="Normal training. Follow your program.";}
+  else if(score>=40){level="Moderate";color=V.warn;rec="Reduce volume 15-20%. Focus on technique.";}
+  else if(score>=25){level="Fatigued";color="#f97316";rec="Light session or active recovery.";}
+  else{level="Rest";color=V.danger;rec="Take a rest day. Recovery is gains.";}
+
+  return{score:Math.round(score),level,color,rec,factors,hasCheckin:!!checkin};
+}
+
+// ─── Daily Check-in Modal ───
+function CheckinModal({s,d,onClose}){
+  const [soreness,setSoreness]=useState(3);
+  const [energy,setEnergy]=useState(3);
+  const [motivation,setMotivation]=useState(3);
+  const [sleep,setSleep]=useState("");
+  const [notes,setNotes]=useState("");
+
+  const labels={soreness:["","Very sore","Sore","Normal","Fresh","Fully recovered"],
+    energy:["","Drained","Low","Normal","High","Wired"],
+    motivation:["","None","Low","Okay","Pumped","On fire"]};
+
+  const Slider=({label,value,onChange,type})=>(
+    <div style={{marginBottom:14}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+        <span style={{fontSize:12,fontWeight:600,color:V.text}}>{label}</span>
+        <span style={{fontSize:11,color:value>=4?V.accent:value>=3?V.warn:V.danger,fontWeight:700,fontFamily:V.mono}}>
+          {labels[type][value]}
+        </span>
+      </div>
+      <div style={{display:"flex",gap:6}}>
+        {[1,2,3,4,5].map(v=>(
+          <button key={v} onClick={()=>onChange(v)} style={{
+            flex:1,height:36,borderRadius:8,border:`1.5px solid ${value>=v?(v>=4?V.accent:v>=3?V.warn:V.danger):V.cardBorder}`,
+            background:value>=v?`${v>=4?V.accent:v>=3?V.warn:V.danger}15`:"rgba(255,255,255,0.02)",
+            cursor:"pointer",WebkitTapHighlightColor:"transparent",
+            fontSize:13,fontWeight:700,color:value>=v?(v>=4?V.accent:v>=3?V.warn:V.danger):V.text3,fontFamily:V.mono,
+          }}>{v}</button>
+        ))}
+      </div>
+    </div>
+  );
+
+  const save=()=>{
+    d({type:"ADD_CHECKIN",c:{
+      date:today(),soreness,energy,motivation,
+      sleep:parseFloat(sleep)||0,notes,
+      timestamp:new Date().toISOString()
+    }});
+    onClose();
+  };
+
+  return(
+    <Sheet title="Daily Check-in" onClose={onClose}>
+      <div style={{fontSize:12,color:V.text3,marginBottom:14,lineHeight:1.5}}>
+        Quick 30-second check. This powers your readiness score and helps adjust your training.
+      </div>
+
+      <Slider label="Muscle Soreness" value={soreness} onChange={setSoreness} type="soreness"/>
+      <Slider label="Energy Level" value={energy} onChange={setEnergy} type="energy"/>
+      <Slider label="Motivation" value={motivation} onChange={setMotivation} type="motivation"/>
+
+      <Field label="Sleep Last Night" type="number" value={sleep} onChange={setSleep} unit="hrs" placeholder="e.g. 7.5" step="0.5"/>
+      <Field label="Notes (optional)" value={notes} onChange={setNotes} placeholder="How are you feeling?"/>
+
+      <Btn full onClick={save} s={{marginTop:8}}>{Icons.check({size:16,color:V.bg})} Log Check-in</Btn>
+    </Sheet>
+  );
+}
+
+// ─── Readiness Card (Home Page) ───
+function ReadinessCard({s,d}){
+  const [showCheckin,setShowCheckin]=useState(false);
+  const r=useMemo(()=>calcReadiness(s),[s.workouts,s.nutrition,s.checkins,s.goals]);
+
+  const circumference=2*Math.PI*38;
+  const dashOffset=circumference-(r.score/100)*circumference;
+
+  return(
+    <div>
+      <Card style={{padding:14}}>
+        <div style={{display:"flex",alignItems:"center",gap:14}}>
+          {/* Circular gauge */}
+          <div style={{position:"relative",width:72,height:72,flexShrink:0}}>
+            <svg width="72" height="72" viewBox="0 0 84 84">
+              <circle cx="42" cy="42" r="38" fill="none" stroke="rgba(255,255,255,0.04)" strokeWidth="6"/>
+              <circle cx="42" cy="42" r="38" fill="none" stroke={r.color} strokeWidth="6"
+                strokeDasharray={circumference} strokeDashoffset={dashOffset}
+                strokeLinecap="round" transform="rotate(-90 42 42)"
+                style={{transition:"stroke-dashoffset 0.8s ease"}}/>
+            </svg>
+            <div style={{position:"absolute",top:0,left:0,width:"100%",height:"100%",
+              display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
+              <div style={{fontSize:22,fontWeight:900,color:r.color,fontFamily:V.mono,lineHeight:1}}>{r.score}</div>
+              <div style={{fontSize:7,color:V.text3,fontWeight:700,textTransform:"uppercase",letterSpacing:".06em"}}>{r.level}</div>
+            </div>
+          </div>
+
+          {/* Info */}
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:4}}>
+              <div style={{fontSize:13,fontWeight:700,color:V.text}}>Readiness</div>
+              {!r.hasCheckin&&(
+                <button onClick={()=>setShowCheckin(true)} style={{
+                  padding:"4px 10px",borderRadius:8,background:`${V.accent}12`,border:`1px solid ${V.accent}25`,
+                  cursor:"pointer",WebkitTapHighlightColor:"transparent",
+                  fontSize:10,fontWeight:700,color:V.accent,fontFamily:V.font
+                }}>Check in</button>
+              )}
+              {r.hasCheckin&&(
+                <span style={{fontSize:9,color:V.accent,fontWeight:600}}>{Icons.check({size:10,color:V.accent})} Logged</span>
+              )}
+            </div>
+            <div style={{fontSize:11,color:V.text3,lineHeight:1.5,marginBottom:6}}>{r.rec}</div>
+            <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
+              {r.factors.slice(0,3).map((f,i)=>(
+                <span key={i} style={{fontSize:8,padding:"2px 6px",borderRadius:4,
+                  background:`${f.color}10`,color:f.color,fontWeight:600}}>
+                  {f.label}
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      {showCheckin&&<CheckinModal s={s} d={d} onClose={()=>setShowCheckin(false)}/>}
+    </div>
+  );
+}
+
+// ─── Readiness Trend (Track Hub) ───
+function ReadinessTrend({s}){
+  const data=useMemo(()=>{
+    const days=[];
+    for(let i=13;i>=0;i--){
+      const d=ago(i);
+      const checkin=(s.checkins||[]).find(c=>c.date===d);
+      const tn=s.nutrition.find(n=>n.date===d);
+      // Simplified readiness for historical (no self-report for past days without checkin)
+      let score=50;
+      const sleep=checkin?.sleep||tn?.sleep||0;
+      if(sleep>=7.5)score+=25;else if(sleep>=6.5)score+=18;else if(sleep>=5)score+=8;
+      if(checkin){
+        const avg=(checkin.soreness+checkin.energy+checkin.motivation)/3;
+        score+=Math.round(avg*4);
+      }
+      const wThatDay=s.workouts.find(w=>w.date===d);
+      if(wThatDay)score+=5;
+      days.push({date:fmtShort(d),score:Math.min(100,Math.max(0,score)),hasCheckin:!!checkin});
+    }
+    return days;
+  },[s.checkins,s.nutrition,s.workouts]);
+
+  const checkinHistory=(s.checkins||[]).slice(0,10);
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",gap:12}}>
+      <div style={{fontSize:16,fontWeight:800,color:V.text}}>Readiness Trend</div>
+
+      {data.length>0&&(
+        <Card style={{padding:14}}>
+          <div style={{fontSize:12,color:V.text3,fontWeight:600,marginBottom:10}}>Last 14 Days</div>
+          <div style={{height:120}}>
+            <Recharts.ResponsiveContainer width="100%" height="100%">
+              <Recharts.AreaChart data={data}>
+                <Recharts.XAxis dataKey="date" tick={{fontSize:8,fill:V.text3}} tickLine={false} axisLine={false}/>
+                <Recharts.YAxis domain={[0,100]} tick={{fontSize:8,fill:V.text3}} tickLine={false} axisLine={false} width={25}/>
+                <Recharts.Area type="monotone" dataKey="score" stroke={V.accent} fill={`${V.accent}20`} strokeWidth={2}/>
+                <Recharts.ReferenceLine y={60} stroke={V.warn} strokeDasharray="3 3" strokeOpacity={0.4}/>
+              </Recharts.AreaChart>
+            </Recharts.ResponsiveContainer>
+          </div>
+          <div style={{display:"flex",justifyContent:"center",gap:12,marginTop:6}}>
+            <span style={{fontSize:9,color:V.text3}}>Above 60 = ready to train</span>
+            <span style={{fontSize:9,color:V.warn}}>- - threshold</span>
+          </div>
+        </Card>
+      )}
+
+      {/* Check-in history */}
+      <div style={{fontSize:13,fontWeight:700,color:V.text}}>Recent Check-ins</div>
+      {checkinHistory.length===0?(
+        <Card style={{padding:16,textAlign:"center"}}>
+          <div style={{fontSize:12,color:V.text3}}>No check-ins yet. Log your first from the Home page.</div>
+        </Card>
+      ):checkinHistory.map(c=>(
+        <Card key={c.date} style={{padding:12}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+            <span style={{fontSize:12,fontWeight:700,color:V.text}}>{fmtShort(c.date)}</span>
+            {c.sleep>0&&<span style={{fontSize:10,color:V.purple,fontFamily:V.mono}}>{Icons.moon({size:10,color:V.purple})} {c.sleep.toFixed(1)}h</span>}
+          </div>
+          <div style={{display:"flex",gap:8}}>
+            {[{l:"Soreness",v:c.soreness,c2:c.soreness>=4?V.accent:c.soreness>=3?V.warn:V.danger},
+              {l:"Energy",v:c.energy,c2:c.energy>=4?V.accent:c.energy>=3?V.warn:V.danger},
+              {l:"Motivation",v:c.motivation,c2:c.motivation>=4?V.accent:c.motivation>=3?V.warn:V.danger}
+            ].map(m=>(
+              <div key={m.l} style={{flex:1,textAlign:"center",padding:"6px 0",borderRadius:8,background:`${m.c2}08`}}>
+                <div style={{fontSize:16,fontWeight:800,color:m.c2,fontFamily:V.mono}}>{m.v}</div>
+                <div style={{fontSize:8,color:V.text3,fontWeight:600}}>{m.l}</div>
+              </div>
+            ))}
+          </div>
+          {c.notes&&<div style={{fontSize:10,color:V.text3,marginTop:6,fontStyle:"italic"}}>{c.notes}</div>}
+        </Card>
+      ))}
+    </div>
+  );
+}
+
 // ═══════════════════════════════════════
 //  HOME TAB
 // ═══════════════════════════════════════
 function HomeTab({s,d}){
+  const [shareCard,setShareCard]=useState(false);
   const td=today();
   const streak=useStreak(s.workouts);
   const prs=usePRs(s.workouts,s.exercises);
@@ -1054,7 +1339,10 @@ function HomeTab({s,d}){
       {/* Hero: Greeting + Today + Streak */}
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
         <div>
-          <div style={{fontSize:12,color:V.text3}}>{greeting}{displayName?`, ${displayName}`:""}</div>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <div style={{fontSize:12,color:V.text3}}>{greeting}{displayName?`, ${displayName}`:""}</div>
+            <SyncStatus s={s}/>
+          </div>
           <div style={{fontSize:20,fontWeight:800,color:V.text,lineHeight:1.2}}>
             {todayType==="Rest"?"Recovery Day":`${todayType} Day`}
           </div>
@@ -1088,6 +1376,9 @@ function HomeTab({s,d}){
           </button>
         ))}
       </div>
+
+      {/* Readiness Score */}
+      <ReadinessCard s={s} d={d}/>
 
       {/* Week + Stats combined in one card */}
       <Card style={{padding:12}}>
@@ -1177,13 +1468,18 @@ function HomeTab({s,d}){
       {/* Today's Workout — only if completed */}
       {todayW&&(
         <Card glow style={{padding:12}}>
-          <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:shareCard?10:0}}>
             {Icons.check({size:14,color:V.accent})}
             <span style={{fontSize:12,color:V.accent,fontWeight:700}}>Workout Complete</span>
             <span style={{flex:1}}/>
             <span style={{fontSize:10,color:V.text3}}>{todayW.exercises.reduce((n,e)=>n+e.sets.length,0)}s · {todayW.dur}m</span>
             {todayW.rating&&<span style={{fontSize:9,color:V.warn}}>{"★".repeat(todayW.rating)}</span>}
+            <button onClick={()=>setShareCard(!shareCard)} style={{marginLeft:4,padding:"3px 8px",borderRadius:6,
+              background:`${V.accent}12`,border:"none",cursor:"pointer",fontSize:9,color:V.accent,fontWeight:700}}>
+              {shareCard?"Hide":"Share"}
+            </button>
           </div>
+          {shareCard&&<WorkoutCard workout={todayW} s={s}/>}
         </Card>
       )}
 
@@ -3041,7 +3337,7 @@ function DataManager({s,d}){
     const data={
       _ironlog:{version:CURRENT_VERSION,exported:new Date().toISOString(),platform:"IRONLOG v3"},
       workouts:s.workouts,nutrition:s.nutrition,body:s.body,exercises:s.exercises,
-      goals:s.goals,schedule:s.schedule,units:s.units,photos:s.photos||[],profile:s.profile||{}
+      goals:s.goals,schedule:s.schedule,units:s.units,photos:s.photos||[],profile:s.profile||{},checkins:s.checkins||[],milestones:s.milestones||[]
     };
     const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
     const url=URL.createObjectURL(blob);
@@ -3668,6 +3964,519 @@ function StrengthScoreCard({s}){
 }
 
 // ─── Log Hub: Central action screen ───
+// ─── #2 Goal Engine + Milestones ───
+function GoalEngine({s,d}){
+  const [showAdd,setShowAdd]=useState(false);
+  const [form,setForm]=useState({type:"weight",target:"",deadline:"",label:""});
+
+  const goals=s.milestones||[];
+
+  const addGoal=()=>{
+    if(!form.target||!form.deadline)return;
+    const g={id:uid(),type:form.type,target:parseFloat(form.target),deadline:form.deadline,
+      label:form.label||`${form.type==="weight"?"Reach":"Hit"} ${form.target}`,
+      created:today(),completed:false};
+    d({type:"SET_MILESTONES",milestones:[...goals,g]});
+    setForm({type:"weight",target:"",deadline:"",label:""});
+    setShowAdd(false);
+  };
+
+  const deleteGoal=(id)=>d({type:"SET_MILESTONES",milestones:goals.filter(g=>g.id!==id)});
+  const completeGoal=(id)=>d({type:"SET_MILESTONES",milestones:goals.map(g=>g.id===id?{...g,completed:true,completedDate:today()}:g)});
+
+  const calcProgress=(g)=>{
+    if(g.type==="weight"){
+      const bw=s.body.find(b=>b.weight)?.weight||0;
+      const startBW=s.body.slice(-1)[0]?.weight||bw;
+      if(!startBW||!bw)return 0;
+      const total=Math.abs(g.target-startBW);
+      const done=Math.abs(bw-startBW);
+      return total>0?Math.min(100,Math.round((done/total)*100)):0;
+    }
+    if(g.type==="strength"){
+      const lifts={"bench":"bench","squat":"squat","deadlift":"deadlift","ohp":"ohp"};
+      let maxW=0;
+      s.workouts.forEach(w=>w.exercises.forEach(ex=>{
+        ex.sets.forEach(st=>{if(st.weight>maxW)maxW=st.weight;});
+      }));
+      return maxW>=g.target?100:Math.min(99,Math.round((maxW/g.target)*100));
+    }
+    if(g.type==="nutrition"){
+      const last30=s.nutrition.filter(n=>n.date>=ago(30));
+      const hits=last30.filter(n=>n.protein>=s.goals.protein*.8).length;
+      const target=parseInt(g.target)||25;
+      return Math.min(100,Math.round((hits/target)*100));
+    }
+    if(g.type==="consistency"){
+      const last30=s.workouts.filter(w=>w.date>=ago(30)).length;
+      return Math.min(100,Math.round((last30/parseInt(g.target||16))*100));
+    }
+    return 0;
+  };
+
+  const daysLeft=(deadline)=>{
+    const d2=Math.ceil((new Date(deadline)-new Date(today()))/(86400000));
+    return d2;
+  };
+
+  const types=[
+    {id:"weight",label:"Weight Goal",icon:"⚖️",ex:"Lose 10 lbs by summer"},
+    {id:"strength",label:"Strength PR",icon:"💪",ex:"Bench 225 lbs"},
+    {id:"nutrition",label:"Nutrition Streak",icon:"🥩",ex:"Hit protein 25/30 days"},
+    {id:"consistency",label:"Consistency",icon:"🔥",ex:"Train 16x this month"},
+  ];
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",gap:12}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div style={{fontSize:16,fontWeight:800,color:V.text}}>Goals & Milestones</div>
+        <button onClick={()=>setShowAdd(true)} style={{padding:"6px 12px",borderRadius:8,
+          background:`${V.accent}12`,border:`1px solid ${V.accent}25`,cursor:"pointer",
+          WebkitTapHighlightColor:"transparent",fontSize:11,fontWeight:700,color:V.accent,fontFamily:V.font}}>
+          + New Goal
+        </button>
+      </div>
+
+      {goals.filter(g=>!g.completed).length===0&&!showAdd&&(
+        <Card style={{padding:20,textAlign:"center"}}>
+          <div style={{fontSize:28,marginBottom:8}}>🎯</div>
+          <div style={{fontSize:13,fontWeight:600,color:V.text,marginBottom:4}}>No active goals</div>
+          <div style={{fontSize:11,color:V.text3}}>Set a target to stay focused and track progress</div>
+        </Card>
+      )}
+
+      {goals.filter(g=>!g.completed).map(g=>{
+        const pct=calcProgress(g);
+        const dl=daysLeft(g.deadline);
+        const c=pct>=100?V.accent:dl<0?V.danger:dl<7?V.warn:V.accent2;
+        return(
+          <Card key={g.id} style={{padding:14}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
+              <div>
+                <div style={{fontSize:13,fontWeight:700,color:V.text}}>{g.label}</div>
+                <div style={{fontSize:10,color:V.text3,marginTop:2}}>
+                  {dl>0?`${dl} days left`:<span style={{color:V.danger}}>Overdue</span>}
+                  {" · "}Target: {g.target}{g.type==="weight"?` ${s.units}`:g.type==="nutrition"?" days":""}
+                </div>
+              </div>
+              <div style={{display:"flex",gap:6}}>
+                {pct>=100&&<button onClick={()=>completeGoal(g.id)} style={{padding:"4px 8px",borderRadius:6,
+                  background:`${V.accent}15`,border:"none",cursor:"pointer",fontSize:10,color:V.accent,fontWeight:700}}>✓ Done</button>}
+                <button onClick={()=>deleteGoal(g.id)} style={{padding:"4px 8px",borderRadius:6,
+                  background:"rgba(255,107,107,0.08)",border:"none",cursor:"pointer",fontSize:10,color:V.danger}}>✕</button>
+              </div>
+            </div>
+            <Progress val={pct} max={100} color={c} h={8}/>
+            <div style={{fontSize:10,color:c,fontWeight:700,marginTop:4,fontFamily:V.mono}}>{pct}%</div>
+          </Card>
+        );
+      })}
+
+      {/* Completed goals */}
+      {goals.filter(g=>g.completed).length>0&&(
+        <div>
+          <div style={{fontSize:12,fontWeight:600,color:V.text3,marginBottom:6}}>Completed</div>
+          {goals.filter(g=>g.completed).map(g=>(
+            <Card key={g.id} style={{padding:10,marginBottom:6,opacity:0.6}}>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <span style={{color:V.accent}}>✓</span>
+                <span style={{fontSize:12,color:V.text,fontWeight:600}}>{g.label}</span>
+                <span style={{flex:1}}/>
+                <span style={{fontSize:9,color:V.text3}}>{g.completedDate}</span>
+                <button onClick={()=>deleteGoal(g.id)} style={{background:"none",border:"none",cursor:"pointer",
+                  fontSize:10,color:V.text3,padding:"2px 6px"}}>✕</button>
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {showAdd&&(
+        <Sheet title="New Goal" onClose={()=>setShowAdd(false)}>
+          <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:12}}>
+            {types.map(t=>(
+              <button key={t.id} onClick={()=>setForm(f=>({...f,type:t.id}))} style={{
+                padding:"10px 14px",borderRadius:10,border:`1.5px solid ${form.type===t.id?V.accent:V.cardBorder}`,
+                background:form.type===t.id?`${V.accent}10`:"rgba(255,255,255,0.02)",
+                cursor:"pointer",WebkitTapHighlightColor:"transparent",textAlign:"left"
+              }}>
+                <div style={{fontSize:14}}>{t.icon}</div>
+                <div style={{fontSize:11,fontWeight:600,color:form.type===t.id?V.accent:V.text,marginTop:2}}>{t.label}</div>
+                <div style={{fontSize:9,color:V.text3}}>{t.ex}</div>
+              </button>
+            ))}
+          </div>
+          <Field label="Label" value={form.label} onChange={v=>setForm(f=>({...f,label:v}))} placeholder="e.g. Bench 225 by August"/>
+          <Field label="Target Number" type="number" value={form.target} onChange={v=>setForm(f=>({...f,target:v}))}
+            placeholder={form.type==="weight"?"Target weight":form.type==="strength"?"Weight to hit":form.type==="nutrition"?"Days to hit":"Sessions per month"}/>
+          <Field label="Deadline" type="date" value={form.deadline} onChange={v=>setForm(f=>({...f,deadline:v}))}/>
+          <Btn full onClick={addGoal} s={{marginTop:8}}>{Icons.check({size:16,color:V.bg})} Set Goal</Btn>
+        </Sheet>
+      )}
+    </div>
+  );
+}
+
+// ─── #1 Adaptive Program Builder ───
+function AdaptiveCoach({s}){
+  const r=useMemo(()=>calcReadiness(s),[s.workouts,s.nutrition,s.checkins,s.goals]);
+  const dow=new Date().getDay();
+  const todayType=s.schedule.overrides[today()]||s.schedule.weekly[dow]||"Rest";
+  const u=wUnit(s.units);
+
+  // Generate today's recommended workout based on schedule + readiness
+  const program=useMemo(()=>{
+    if(todayType==="Rest")return{type:"rest",message:"Recovery day. Focus on stretching, mobility, or light cardio.",exercises:[]};
+
+    // Map muscle groups to exercises
+    const muscleMap={
+      "Push":["bench","incbench","ohp","lateralraise","tricep","dip"],
+      "Pull":["deadlift","row","pullup","latpull","curl","facepull"],
+      "Legs":["squat","legpress","rdl","hamcurl","hipthrust","calfraise"],
+      "Chest":["bench","incbench","dbbench","flye","pecfly","dip"],
+      "Back":["deadlift","row","pullup","latpull","cablerow","dbrow"],
+      "Shoulders":["ohp","dbohp","lateralraise","facepull","reardelt","shrug"],
+      "Arms":["curl","hammercurl","preacher","tricep","skullcrusher","ohtriext"],
+      "Upper Body":["bench","row","ohp","latpull","curl","tricep"],
+      "Lower Body":["squat","rdl","legpress","hamcurl","hipthrust","calfraise"],
+      "Full Body":["squat","bench","row","ohp","deadlift","curl"],
+      "Cardio":[]
+    };
+
+    const exIds=muscleMap[todayType]||muscleMap["Full Body"];
+    if(exIds.length===0)return{type:"cardio",message:"Cardio day. 20-40 min steady state or HIIT.",exercises:[]};
+
+    // Look up last performance for each exercise
+    const recs=exIds.slice(0,r.score>=60?6:r.score>=40?5:4).map(eid=>{
+      const ex=s.exercises.find(e=>e.id===eid);
+      if(!ex)return null;
+
+      // Find last time this exercise was done
+      let lastSets=null;
+      for(const w of s.workouts){
+        const found=w.exercises.find(e=>e.exerciseId===eid);
+        if(found){lastSets=found.sets;break;}
+      }
+
+      // Volume adjustment based on readiness
+      let setCount=lastSets?lastSets.length:3;
+      let weightMult=1.0;
+      if(r.score>=80){weightMult=1.025;} // Push for progression
+      else if(r.score>=60){weightMult=1.0;} // Maintain
+      else if(r.score>=40){weightMult=0.9;setCount=Math.max(2,setCount-1);} // Reduce
+      else{weightMult=0.8;setCount=Math.max(2,setCount-1);} // Deload
+
+      const targetWeight=lastSets?Math.round(Math.max(...lastSets.map(st=>st.weight))*weightMult/5)*5:0;
+      const targetReps=lastSets?Math.round(lastSets.reduce((s2,st)=>s2+st.reps,0)/lastSets.length):8;
+
+      return{id:eid,name:ex.name,sets:setCount,reps:targetReps,weight:targetWeight,
+        note:weightMult>1?"↑ Push weight":weightMult<0.95?"↓ Deload":"→ Maintain"};
+    }).filter(Boolean);
+
+    return{type:"workout",message:r.rec,exercises:recs};
+  },[s.workouts,s.exercises,s.schedule,todayType,r]);
+
+  if(program.type==="rest"){
+    return(
+      <div style={{display:"flex",flexDirection:"column",gap:12}}>
+        <div style={{fontSize:16,fontWeight:800,color:V.text}}>Today's Program</div>
+        <Card style={{padding:20,textAlign:"center"}}>
+          <div style={{fontSize:28,marginBottom:8}}>🧘</div>
+          <div style={{fontSize:14,fontWeight:700,color:V.text,marginBottom:4}}>Recovery Day</div>
+          <div style={{fontSize:12,color:V.text3,lineHeight:1.5}}>{program.message}</div>
+        </Card>
+      </div>
+    );
+  }
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",gap:12}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div>
+          <div style={{fontSize:16,fontWeight:800,color:V.text}}>Today's Program</div>
+          <div style={{fontSize:11,color:V.text3}}>{todayType} · Readiness {r.score}/100</div>
+        </div>
+        <div style={{padding:"4px 10px",borderRadius:8,background:`${r.color}15`,border:`1px solid ${r.color}25`}}>
+          <span style={{fontSize:10,fontWeight:700,color:r.color}}>{r.level}</span>
+        </div>
+      </div>
+
+      {/* Readiness-based note */}
+      {r.score<60&&(
+        <div style={{padding:"8px 12px",borderRadius:8,background:`${V.warn}08`,border:`1px solid ${V.warn}15`}}>
+          <span style={{fontSize:11,color:V.warn}}>{program.message}</span>
+        </div>
+      )}
+
+      {program.exercises.map((ex,i)=>(
+        <Card key={ex.id} style={{padding:12}}>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <div style={{width:28,height:28,borderRadius:8,background:`${V.accent}12`,
+              display:"flex",alignItems:"center",justifyContent:"center"}}>
+              <span style={{fontSize:12,fontWeight:800,color:V.accent,fontFamily:V.mono}}>{i+1}</span>
+            </div>
+            <div style={{flex:1}}>
+              <div style={{fontSize:13,fontWeight:700,color:V.text}}>{ex.name}</div>
+              <div style={{fontSize:11,color:V.text3}}>
+                {ex.sets}×{ex.reps} @ {ex.weight>0?`${ex.weight} ${u}`:"bodyweight"}
+                <span style={{marginLeft:6,fontSize:9,color:ex.note.includes("↑")?V.accent:ex.note.includes("↓")?V.warn:V.text3,
+                  fontWeight:600}}>{ex.note}</span>
+              </div>
+            </div>
+          </div>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+// ─── #3 Cloud Sync Status Bar ───
+function SyncStatus({s}){
+  const lastSync=LS.get("ft-last-sync");
+  const email=s.profile?.email;
+
+  const fmtAgo=(iso)=>{
+    if(!iso)return"Never";
+    const sec=Math.floor((Date.now()-new Date(iso).getTime())/1000);
+    if(sec<60)return"Just now";
+    if(sec<3600)return`${Math.floor(sec/60)}m ago`;
+    if(sec<86400)return`${Math.floor(sec/3600)}h ago`;
+    return`${Math.floor(sec/86400)}d ago`;
+  };
+
+  if(!email)return null;
+
+  return(
+    <div style={{display:"flex",alignItems:"center",gap:6,padding:"6px 12px",
+      background:"rgba(255,255,255,0.02)",borderRadius:8,border:`1px solid ${V.cardBorder}`}}>
+      <div style={{width:6,height:6,borderRadius:3,background:lastSync?V.accent:"rgba(255,255,255,0.15)"}}/>
+      <span style={{fontSize:9,color:V.text3}}>
+        {lastSync?`Synced ${fmtAgo(lastSync)}`:"Not synced yet"}
+      </span>
+    </div>
+  );
+}
+
+// ─── #8 Social: Workout Proof Card Generator ───
+function WorkoutCard({workout,s}){
+  const canvasRef=useRef(null);
+  const [generated,setGenerated]=useState(false);
+
+  const generateCard=()=>{
+    const c=canvasRef.current;if(!c)return;
+    const ctx=c.getContext("2d");
+    c.width=600;c.height=400;
+
+    // Background gradient
+    const grad=ctx.createLinearGradient(0,0,600,400);
+    grad.addColorStop(0,"#0a0a14");grad.addColorStop(1,"#14142a");
+    ctx.fillStyle=grad;ctx.fillRect(0,0,600,400);
+
+    // Accent bar
+    ctx.fillStyle="#22d3ee";ctx.fillRect(0,0,4,400);
+
+    // Title
+    ctx.fillStyle="#ffffff";ctx.font="bold 28px -apple-system, sans-serif";
+    ctx.fillText("WORKOUT COMPLETE",24,48);
+
+    // Date
+    ctx.fillStyle="#888";ctx.font="14px -apple-system, sans-serif";
+    ctx.fillText(new Date(workout.date).toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"}),24,72);
+
+    // Stats row
+    const totalSets=workout.exercises.reduce((n,e)=>n+e.sets.length,0);
+    const totalVol=workout.exercises.reduce((v,e)=>v+e.sets.reduce((s2,st)=>s2+st.weight*st.reps,0),0);
+    const stats=[
+      {l:"Duration",v:`${workout.dur||0}min`},{l:"Exercises",v:workout.exercises.length},
+      {l:"Sets",v:totalSets},{l:"Volume",v:totalVol>1000?`${(totalVol/1000).toFixed(1)}k`:totalVol}
+    ];
+
+    stats.forEach((st,i)=>{
+      const x=24+i*145;
+      ctx.fillStyle="#22d3ee";ctx.font="bold 32px -apple-system, sans-serif";
+      ctx.fillText(String(st.v),x,130);
+      ctx.fillStyle="#666";ctx.font="11px -apple-system, sans-serif";
+      ctx.fillText(st.l.toUpperCase(),x,148);
+    });
+
+    // Exercise list
+    ctx.fillStyle="#444";ctx.fillRect(24,170,552,1);
+    workout.exercises.slice(0,5).forEach((ex,i)=>{
+      const y=198+i*36;
+      const name=s.exercises.find(e=>e.id===ex.exerciseId)?.name||ex.exerciseId;
+      const best=Math.max(...ex.sets.map(st=>st.weight));
+      ctx.fillStyle="#ddd";ctx.font="14px -apple-system, sans-serif";
+      ctx.fillText(name,24,y);
+      ctx.fillStyle="#22d3ee";ctx.font="bold 14px -apple-system, sans-serif";
+      ctx.fillText(`${ex.sets.length}×${ex.sets[0]?.reps||0} @ ${best} ${wUnit(s.units)}`,400,y);
+    });
+
+    // Branding
+    ctx.fillStyle="#333";ctx.font="bold 12px -apple-system, sans-serif";
+    ctx.fillText("IRONLOG",24,380);
+    ctx.fillStyle="#555";ctx.font="11px -apple-system, sans-serif";
+    ctx.fillText("ironlog.space",110,380);
+
+    // Rating stars
+    if(workout.rating){
+      ctx.fillStyle="#f59e0b";ctx.font="16px sans-serif";
+      ctx.fillText("★".repeat(workout.rating),500,380);
+    }
+
+    setGenerated(true);
+  };
+
+  const share=()=>{
+    const c=canvasRef.current;if(!c)return;
+    c.toBlob(blob=>{
+      if(navigator.share&&blob){
+        navigator.share({files:[new File([blob],"workout.png",{type:"image/png"})],
+          title:"Workout Complete",text:"Another one in the books 💪"}).catch(()=>{});
+      }else{
+        const url=URL.createObjectURL(blob);
+        const a=document.createElement("a");a.href=url;a.download=`workout-${workout.date}.png`;a.click();
+        URL.revokeObjectURL(url);
+      }
+    },"image/png");
+  };
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",gap:8}}>
+      <canvas ref={canvasRef} style={{width:"100%",borderRadius:12,display:generated?"block":"none"}}/>
+      {!generated?(
+        <Btn full onClick={generateCard}>{Icons.target({size:14,color:V.bg})} Generate Proof Card</Btn>
+      ):(
+        <div style={{display:"flex",gap:8}}>
+          <Btn full onClick={share}>{Icons.upload({size:14,color:V.bg})} Share</Btn>
+          <Btn v="secondary" full onClick={()=>setGenerated(false)}>Close</Btn>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── #6 Form Check Workflow ───
+function FormCheckTab({s,d}){
+  const [selEx,setSelEx]=useState(null);
+  const [recording,setRecording]=useState(false);
+  const [videoUrl,setVideoUrl]=useState(null);
+  const mediaRef=useRef(null);
+  const videoRef=useRef(null);
+  const chunks=useRef([]);
+
+  const formCues={
+    bench:["Bar path: straight up, slight arc back","Scapulae retracted and depressed","Feet flat, arch in lower back","Full ROM: bar to chest","Elbows ~45° angle"],
+    squat:["Feet shoulder width, toes slightly out","Hit parallel or below","Knees track over toes","Chest up, neutral spine","Drive through heels"],
+    deadlift:["Bar over mid-foot","Hips hinge, not squat","Lats engaged, no rounding","Lockout: hips fully extended","Bar close to body throughout"],
+    ohp:["Core braced, glutes tight","Bar starts at collarbone","Press straight up, head through","Full lockout overhead","No excessive back lean"],
+    row:["Torso ~45° angle","Pull to lower chest/stomach","Squeeze shoulder blades","Control the eccentric","No excessive body English"],
+    pullup:["Full hang at bottom","Pull chest to bar","Scapulae retract at top","Control descent","No kipping unless intended"],
+    curl:["Elbows pinned to sides","Full ROM: extend and contract","No swinging body","Squeeze at top","Control negative"],
+    squat:["Feet shoulder width","Break at hips and knees","Knees track over toes","Depth: hip crease below knee","Drive through full foot"],
+  };
+
+  const defaultCues=["Full range of motion","Control the eccentric (lowering)","Maintain neutral spine","Breathe: exhale on exertion","Focus on mind-muscle connection"];
+
+  const startRec=async()=>{
+    try{
+      const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"},audio:false});
+      videoRef.current.srcObject=stream;
+      videoRef.current.play();
+      const mr=new MediaRecorder(stream);
+      chunks.current=[];
+      mr.ondataavailable=e=>{if(e.data.size>0)chunks.current.push(e.data);};
+      mr.onstop=()=>{
+        const blob=new Blob(chunks.current,{type:"video/webm"});
+        setVideoUrl(URL.createObjectURL(blob));
+        stream.getTracks().forEach(t=>t.stop());
+      };
+      mediaRef.current=mr;
+      mr.start();
+      setRecording(true);
+    }catch(e){
+      alert("Camera access needed for form check.");
+    }
+  };
+
+  const stopRec=()=>{
+    if(mediaRef.current&&mediaRef.current.state==="recording"){
+      mediaRef.current.stop();
+      setRecording(false);
+    }
+  };
+
+  const exercises=s.exercises.filter(e=>["Chest","Back","Legs","Shoulders","Arms"].includes(e.cat)).slice(0,20);
+  const cues=formCues[selEx]||defaultCues;
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",gap:12}}>
+      <div style={{fontSize:16,fontWeight:800,color:V.text}}>Form Check</div>
+      <div style={{fontSize:12,color:V.text3}}>Record a set and review against form cues</div>
+
+      {/* Exercise selector */}
+      <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+        {exercises.slice(0,8).map(ex=>(
+          <button key={ex.id} onClick={()=>setSelEx(ex.id)} style={{
+            padding:"6px 12px",borderRadius:8,border:`1.5px solid ${selEx===ex.id?V.accent:V.cardBorder}`,
+            background:selEx===ex.id?`${V.accent}10`:"rgba(255,255,255,0.02)",
+            cursor:"pointer",WebkitTapHighlightColor:"transparent",
+            fontSize:11,fontWeight:600,color:selEx===ex.id?V.accent:V.text3,fontFamily:V.font
+          }}>{ex.name.length>15?ex.name.slice(0,15)+"…":ex.name}</button>
+        ))}
+      </div>
+
+      {selEx&&(
+        <div>
+          {/* Form cues checklist */}
+          <Card style={{padding:12,marginBottom:10}}>
+            <div style={{fontSize:12,fontWeight:700,color:V.text,marginBottom:8}}>Form Cues: {s.exercises.find(e=>e.id===selEx)?.name}</div>
+            {cues.map((cue,i)=>(
+              <div key={i} style={{display:"flex",alignItems:"flex-start",gap:8,marginBottom:6}}>
+                <div style={{width:18,height:18,borderRadius:4,border:`1.5px solid ${V.accent}40`,
+                  display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,marginTop:1}}>
+                  <span style={{fontSize:10,color:V.accent}}>✓</span>
+                </div>
+                <span style={{fontSize:11,color:V.text2,lineHeight:1.5}}>{cue}</span>
+              </div>
+            ))}
+          </Card>
+
+          {/* Video area */}
+          <Card style={{padding:12}}>
+            <video ref={videoRef} style={{width:"100%",borderRadius:8,background:"#000",display:recording?"block":"none"}} playsInline muted/>
+            {videoUrl&&!recording&&(
+              <video src={videoUrl} style={{width:"100%",borderRadius:8}} controls playsInline/>
+            )}
+            <div style={{display:"flex",gap:8,marginTop:10}}>
+              {!recording&&!videoUrl&&(
+                <Btn full onClick={startRec}>{Icons.target({size:14,color:V.bg})} Record Set</Btn>
+              )}
+              {recording&&(
+                <Btn full onClick={stopRec} s={{background:V.danger}}>{Icons.x({size:14,color:"#fff"})} Stop</Btn>
+              )}
+              {videoUrl&&!recording&&(
+                <div style={{display:"flex",gap:8,width:"100%"}}>
+                  <Btn v="secondary" full onClick={()=>{setVideoUrl(null);}}>Retake</Btn>
+                  <Btn full onClick={()=>{
+                    const a=document.createElement("a");a.href=videoUrl;a.download=`formcheck-${selEx}-${today()}.webm`;a.click();
+                  }}>{Icons.download({size:14,color:V.bg})} Save</Btn>
+                </div>
+              )}
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {!selEx&&(
+        <Card style={{padding:20,textAlign:"center"}}>
+          <div style={{fontSize:12,color:V.text3}}>Select an exercise above to see form cues and record a set</div>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+// ─── Log Hub ───
 function LogHub({s,d}){
   return(
     <div style={{display:"flex",flexDirection:"column",gap:14}}>
@@ -3715,8 +4524,12 @@ function TrackHub({s,d}){
         {id:"track_body",icon:Icons.scale,label:"Body Progress",desc:"Weight, measurements & charts",color:V.accent2},
         {id:"track_photos",icon:Icons.target,label:"Progress Photos",desc:"Visual body transformation tracking",color:"#e879f9"},
         {id:"track_analytics",icon:Icons.chart,label:"Analytics",desc:"Progression, volume & frequency",color:V.purple},
+        {id:"track_goals",icon:Icons.target,label:"Goals & Milestones",desc:"Track objectives & progress",color:"#f43f5e"},
+        {id:"track_coach",icon:Icons.zap,label:"AI Coach",desc:"Adaptive program for today",color:"#22d3ee"},
+        {id:"track_readiness",icon:Icons.activity,label:"Readiness Trend",desc:"Recovery, sleep & training load",color:V.accent},
         {id:"track_muscles",icon:Icons.activity,label:"Muscle Heat Map",desc:"See which muscles need work",color:"#f97316"},
         {id:"track_strength",icon:Icons.trophy,label:"Strength Score",desc:"Your overall strength rating",color:"#a855f7"},
+        {id:"track_formcheck",icon:Icons.target,label:"Form Check",desc:"Record sets & review cues",color:"#f472b6"},
         {id:"track_onerm",icon:Icons.zap,label:"1RM Calculator",desc:"Estimate your one-rep max",color:V.warn},
       ].map(item=>(
         <button key={item.id} onClick={()=>d({type:"TAB",tab:item.id})} style={{
@@ -3752,11 +4565,11 @@ function App(){
     (async()=>{
       try{
         const data={};
-        ["ft-w","ft-n","ft-b","ft-ex","ft-g","ft-sched","ft-units","ft-onb","ft-photos","ft-profile"].forEach(k=>{const v=LS.get(k);if(v!==null)data[k]=v;});
+        ["ft-w","ft-n","ft-b","ft-ex","ft-g","ft-sched","ft-units","ft-onb","ft-photos","ft-profile","ft-checkins","ft-milestones"].forEach(k=>{const v=LS.get(k);if(v!==null)data[k]=v;});
         d({type:"INIT",p:{workouts:data["ft-w"]||[],nutrition:data["ft-n"]||[],body:data["ft-b"]||[],
           exercises:data["ft-ex"]||defaultExercises,goals:data["ft-g"]||init.goals,schedule:data["ft-sched"]||defaultSchedule,
           units:data["ft-units"]||"lbs",onboarded:data["ft-onb"]||false,photos:data["ft-photos"]||[],
-          profile:data["ft-profile"]||init.profile}});
+          profile:data["ft-profile"]||init.profile,checkins:data["ft-checkins"]||[],milestones:data["ft-milestones"]||[]}});
       }catch(e){
         d({type:"INIT",p:{exercises:defaultExercises,goals:init.goals,schedule:defaultSchedule}});
       }
@@ -3776,12 +4589,14 @@ function App(){
       LS.set("ft-onb",s.onboarded);
       LS.set("ft-photos",s.photos);
       LS.set("ft-profile",s.profile);
+      LS.set("ft-checkins",s.checkins||[]);
+      LS.set("ft-milestones",s.milestones||[]);
       // Auto-sync to cloud (debounced)
       if(s.onboarded&&s.profile?.email){
         CloudSync.debouncedPush(s);
       }
     }catch(e){}})();
-  },[s.workouts,s.nutrition,s.body,s.exercises,s.goals,s.schedule,s.units,s.onboarded,s.photos,s.profile,s.loaded]);
+  },[s.workouts,s.nutrition,s.body,s.exercises,s.goals,s.schedule,s.units,s.onboarded,s.photos,s.profile,s.checkins,s.milestones,s.loaded]);
 
   // Sync on app open — push local data to server
   useEffect(()=>{
@@ -3789,6 +4604,14 @@ function App(){
       CloudSync.push(s);
     }
   },[s.loaded,s.onboarded]);
+
+  // Listen for service worker update
+  const [updateAvailable,setUpdateAvailable]=useState(false);
+  useEffect(()=>{
+    const handler=(e)=>{if(e.data?.type==="UPDATE_AVAILABLE")setUpdateAvailable(true);};
+    navigator.serviceWorker?.addEventListener("message",handler);
+    return()=>navigator.serviceWorker?.removeEventListener("message",handler);
+  },[]);
 
   // Show onboarding if first launch
   if(s.loaded&&!s.onboarded) return <Onboarding d={d}/>;
@@ -3849,6 +4672,17 @@ function App(){
         </div>
       </div>
 
+      {/* Update available banner */}
+      {updateAvailable&&(
+        <div style={{padding:"8px 20px",background:`${V.accent}12`,borderBottom:`1px solid ${V.accent}25`,
+          display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}}>
+          <span style={{fontSize:11,color:V.accent,fontWeight:600}}>New version available</span>
+          <button onClick={()=>{navigator.serviceWorker?.controller?.postMessage({type:"SKIP_WAITING"});window.location.reload();}}
+            style={{padding:"4px 12px",borderRadius:6,background:V.accent,border:"none",cursor:"pointer",
+              fontSize:10,fontWeight:700,color:V.bg,fontFamily:V.font}}>Update</button>
+        </div>
+      )}
+
       {/* Content — scrollable region */}
       <div ref={contentRef} style={{flex:1,minHeight:0,overflowY:"auto",overflowX:"hidden",
         WebkitOverflowScrolling:"touch",padding:"0 16px 24px",
@@ -3870,8 +4704,12 @@ function App(){
         {s.tab==="track_body"&&<div><SubBack to="track" label="Track"/><BodyTab s={s} d={d}/></div>}
         {s.tab==="track_photos"&&<div><SubBack to="track" label="Track"/><ProgressPhotos s={s} d={d}/></div>}
         {s.tab==="track_analytics"&&<div><SubBack to="track" label="Track"/><AnalyticsTab s={s} d={d}/></div>}
+        {s.tab==="track_goals"&&<div><SubBack to="track" label="Track"/><GoalEngine s={s} d={d}/></div>}
+        {s.tab==="track_coach"&&<div><SubBack to="track" label="Track"/><AdaptiveCoach s={s}/></div>}
+        {s.tab==="track_readiness"&&<div><SubBack to="track" label="Track"/><ReadinessTrend s={s}/></div>}
         {s.tab==="track_muscles"&&<div><SubBack to="track" label="Track"/><MuscleHeatMap s={s}/></div>}
         {s.tab==="track_strength"&&<div><SubBack to="track" label="Track"/><StrengthScoreCard s={s}/></div>}
+        {s.tab==="track_formcheck"&&<div><SubBack to="track" label="Track"/><FormCheckTab s={s} d={d}/></div>}
         {s.tab==="track_onerm"&&<div><SubBack to="track" label="Track"/><OneRMCalc units={s.units}/></div>}
 
         {/* Global footer on every page */}
