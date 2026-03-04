@@ -140,6 +140,73 @@ const LS={
   set:(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}},
 };
 
+// ─── Cloud Sync Engine ───
+const SYNC_URL="https://ironlog-api.vercel.app";
+let syncTimer=null;
+let syncInFlight=false;
+
+const CloudSync={
+  // Push all data to server (debounced, silent)
+  push:async(state)=>{
+    if(syncInFlight)return;
+    const email=state.profile?.email;
+    if(!email)return; // not onboarded yet
+    syncInFlight=true;
+    try{
+      await fetch(`${SYNC_URL}/api/sync/push`,{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          email,
+          deviceId:LS.get("ft-device-id")||"unknown",
+          workouts:state.workouts||[],
+          nutrition:state.nutrition||[],
+          body:state.body||[],
+          photos:(state.photos||[]).filter(p=>!p.data||p.data.length<500000),
+          settings:{
+            goals:state.goals,
+            schedule:state.schedule,
+            exercises:state.exercises,
+            units:state.units,
+          },
+        }),
+      });
+      LS.set("ft-last-sync",new Date().toISOString());
+    }catch(e){
+      // Silent fail — local data is always the source of truth
+    }
+    syncInFlight=false;
+  },
+
+  // Debounced push — waits 3 seconds after last change before syncing
+  debouncedPush:(state)=>{
+    if(syncTimer)clearTimeout(syncTimer);
+    syncTimer=setTimeout(()=>CloudSync.push(state),3000);
+  },
+
+  // Pull all data from server (for restore)
+  pull:async(email,deviceId)=>{
+    try{
+      const res=await fetch(`${SYNC_URL}/api/sync/pull`,{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({email,deviceId}),
+      });
+      if(!res.ok)throw new Error("Pull failed");
+      const json=await res.json();
+      if(json.success)return json;
+      return null;
+    }catch(e){
+      return null;
+    }
+  },
+};
+
+// Generate and persist a device ID
+if(!LS.get("ft-device-id")){
+  LS.set("ft-device-id","dev_"+Math.random().toString(36).slice(2,10)+Date.now().toString(36));
+}
+
 
 // ─── Icons (inline SVG for mobile perf) ───
 const Icon = ({ d, size = 20, color = "currentColor", strokeWidth = 2 }) => (
@@ -2966,7 +3033,9 @@ function ProfileEditor({s,d}){
 function DataManager({s,d}){
   const fileRef=useRef(null);
   const [msg,setMsg]=useState(null);
+  const [restoring,setRestoring]=useState(false);
   const CURRENT_VERSION=3;
+  const lastSync=LS.get("ft-last-sync");
 
   const exportData=()=>{
     const data={
@@ -2989,18 +3058,13 @@ function DataManager({s,d}){
     reader.onload=(ev)=>{
       try{
         const raw=JSON.parse(ev.target.result);
-        // Strip metadata
         const data={...raw};delete data._ironlog;
-
-        // Smart merge: count what's new vs existing
         const existingWIds=new Set(s.workouts.map(w=>w.id));
         const existingNIds=new Set(s.nutrition.map(n=>n.id));
         const existingBIds=new Set(s.body.map(b=>b.id));
         const newW=(data.workouts||[]).filter(w=>!existingWIds.has(w.id)).length;
         const newN=(data.nutrition||[]).filter(n=>!existingNIds.has(n.id)).length;
         const newB=(data.body||[]).filter(b=>!existingBIds.has(b.id)).length;
-
-        // Merge arrays (keep existing + add new)
         const merged={
           ...data,
           workouts:[...s.workouts,...(data.workouts||[]).filter(w=>!existingWIds.has(w.id))],
@@ -3008,7 +3072,6 @@ function DataManager({s,d}){
           body:[...s.body,...(data.body||[]).filter(b=>!existingBIds.has(b.id))],
           exercises:[...s.exercises,...(data.exercises||[]).filter(e=>!s.exercises.some(x=>x.id===e.id))],
         };
-
         d({type:"IMPORT",data:merged});
         setMsg({type:"success",text:`Imported! +${newW} workouts, +${newN} nutrition, +${newB} measurements`});
         setTimeout(()=>setMsg(null),5000);
@@ -3018,7 +3081,43 @@ function DataManager({s,d}){
       }
     };
     reader.readAsText(file);
-    e.target.value=""; // reset file input
+    e.target.value="";
+  };
+
+  const restoreFromCloud=async()=>{
+    const email=s.profile?.email;
+    if(!email){setMsg({type:"error",text:"No email found. Complete your profile first."});setTimeout(()=>setMsg(null),4000);return;}
+    setRestoring(true);
+    const result=await CloudSync.pull(email,LS.get("ft-device-id"));
+    if(result&&result.success){
+      const cloud=result.data;
+      // Smart merge cloud data into local
+      const existingWIds=new Set(s.workouts.map(w=>w.id));
+      const existingNIds=new Set(s.nutrition.map(n=>n.id));
+      const existingBIds=new Set(s.body.map(b=>b.id));
+      const newW=(cloud.workouts||[]).filter(w=>!existingWIds.has(w.id));
+      const newN=(cloud.nutrition||[]).filter(n=>!existingNIds.has(n.id));
+      const newB=(cloud.body||[]).filter(b=>!existingBIds.has(b.id));
+      const newP=(cloud.photos||[]).filter(p=>!s.photos.some(x=>x.id===p.id));
+
+      const merged={
+        workouts:[...s.workouts,...newW].sort((a,b)=>b.date.localeCompare(a.date)),
+        nutrition:[...s.nutrition,...newN].sort((a,b)=>b.date.localeCompare(a.date)),
+        body:[...s.body,...newB].sort((a,b)=>b.date.localeCompare(a.date)),
+        photos:[...s.photos,...newP],
+        exercises:cloud.exercises||s.exercises,
+        goals:cloud.goals||s.goals,
+        schedule:cloud.schedule||s.schedule,
+        units:cloud.units||s.units,
+        profile:cloud.profile||s.profile,
+      };
+      d({type:"IMPORT",data:merged});
+      setMsg({type:"success",text:`Restored from cloud! +${newW.length} workouts, +${newN.length} nutrition, +${newB.length} measurements`});
+    }else{
+      setMsg({type:"error",text:"No cloud backup found for this account, or server is unreachable."});
+    }
+    setRestoring(false);
+    setTimeout(()=>setMsg(null),5000);
   };
 
   return(
@@ -3031,13 +3130,49 @@ function DataManager({s,d}){
           {msg.text}
         </div>
       )}
+
+      {/* Sync status */}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 12px",
+        background:"rgba(255,255,255,0.02)",borderRadius:8,border:`1px solid ${V.cardBorder}`}}>
+        <div>
+          <div style={{fontSize:11,color:V.text3}}>Cloud Sync</div>
+          <div style={{fontSize:10,color:s.profile?.email?V.accent:V.text3,fontFamily:V.mono}}>
+            {s.profile?.email?`Linked: ${s.profile.email}`:"Not linked — complete profile"}
+          </div>
+        </div>
+        {lastSync&&(
+          <div style={{fontSize:9,color:V.text3,textAlign:"right"}}>
+            Last sync<br/><span style={{fontFamily:V.mono}}>{new Date(lastSync).toLocaleString()}</span>
+          </div>
+        )}
+      </div>
+
       <div style={{fontSize:11,color:V.text3,marginBottom:2}}>
         {s.workouts.length} workouts · {s.nutrition.length} nutrition logs · {s.body.length} measurements
       </div>
-      <Btn full onClick={exportData}>{Icons.download({size:16,color:V.bg})} Export Backup</Btn>
-      <input ref={fileRef} type="file" accept=".json" onChange={importData} style={{display:"none"}}/>
-      <Btn v="secondary" full onClick={()=>fileRef.current?.click()}>{Icons.upload({size:14,color:V.text2})} Import Backup</Btn>
-      <div style={{fontSize:10,color:V.text3,marginTop:2}}>Import merges data — your existing entries won't be duplicated or lost.</div>
+
+      {/* Cloud restore */}
+      <Btn full onClick={restoreFromCloud} disabled={restoring}>
+        {restoring?(
+          <span style={{display:"flex",alignItems:"center",gap:8,justifyContent:"center"}}>
+            <div style={{width:14,height:14,borderRadius:7,border:"2px solid rgba(255,255,255,0.2)",
+              borderTopColor:V.bg,animation:"spin 0.8s linear infinite"}}/>
+            Restoring...
+          </span>
+        ):(
+          <span>{Icons.download({size:16,color:V.bg})} Restore from Cloud</span>
+        )}
+      </Btn>
+      <div style={{fontSize:10,color:V.text3}}>Pull your data from the server. Use this on a new device to get all your workouts, nutrition, and measurements back.</div>
+
+      {/* Local export/import */}
+      <div style={{borderTop:`1px solid ${V.cardBorder}`,paddingTop:10,marginTop:4}}>
+        <div style={{fontSize:11,fontWeight:600,color:V.text3,marginBottom:8}}>Local Backup</div>
+        <Btn v="secondary" full onClick={exportData}>{Icons.download({size:14,color:V.text2})} Export JSON</Btn>
+        <input ref={fileRef} type="file" accept=".json" onChange={importData} style={{display:"none"}}/>
+        <Btn v="secondary" full onClick={()=>fileRef.current?.click()} s={{marginTop:6}}>{Icons.upload({size:14,color:V.text2})} Import JSON</Btn>
+        <div style={{fontSize:10,color:V.text3,marginTop:4}}>Import merges data — your existing entries won't be duplicated or lost.</div>
+      </div>
     </div>
   );
 }
@@ -3641,8 +3776,19 @@ function App(){
       LS.set("ft-onb",s.onboarded);
       LS.set("ft-photos",s.photos);
       LS.set("ft-profile",s.profile);
+      // Auto-sync to cloud (debounced)
+      if(s.onboarded&&s.profile?.email){
+        CloudSync.debouncedPush(s);
+      }
     }catch(e){}})();
   },[s.workouts,s.nutrition,s.body,s.exercises,s.goals,s.schedule,s.units,s.onboarded,s.photos,s.profile,s.loaded]);
+
+  // Sync on app open — push local data to server
+  useEffect(()=>{
+    if(s.loaded&&s.onboarded&&s.profile?.email){
+      CloudSync.push(s);
+    }
+  },[s.loaded,s.onboarded]);
 
   // Show onboarding if first launch
   if(s.loaded&&!s.onboarded) return <Onboarding d={d}/>;
