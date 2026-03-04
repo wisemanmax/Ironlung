@@ -3247,8 +3247,7 @@ function SettingsTab({s,d}){
               const perm=await Notification.requestPermission();
               if(perm==="granted"){
                 LS.set("ft-reminders",true);
-                LS.set("ft-push-subscribed",false); // Reset to trigger subscription
-                SuccessToastCtrl.show("Notifications enabled");
+                LS.set("ft-push-subscribed",false);
                 // Trigger Web Push subscription immediately
                 if("serviceWorker" in navigator&&"PushManager" in window){
                   try{
@@ -3256,17 +3255,21 @@ function SettingsTab({s,d}){
                     let sub=await reg.pushManager.getSubscription();
                     if(!sub){
                       const vapidKey="BMZyIUQO08nuR7afvqNIWBK_ZOcr7PHwT2YwIxTa_ONwAD1YCaJ8Qkb4q4TTYSx_sTN-7-5vCzR8ApNZuyg-Ttc";
-                      const keyBytes=Uint8Array.from(atob(vapidKey.replace(/-/g,'+').replace(/_/g,'/')),c=>c.charCodeAt(0));
+                      const padding='='.repeat((4-vapidKey.length%4)%4);
+                      const b64=vapidKey.replace(/-/g,'+').replace(/_/g,'/')+padding;
+                      const keyBytes=Uint8Array.from(atob(b64),c=>c.charCodeAt(0));
                       sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:keyBytes});
                     }
-                    await fetch(`${SYNC_URL}/api/push/subscribe`,{
+                    const res=await fetch(`${SYNC_URL}/api/push/subscribe`,{
                       method:"POST",headers:AuthToken.getHeaders(s.profile?.email||""),
                       body:JSON.stringify({email:s.profile?.email||"",subscription:sub.toJSON()})
                     });
-                    LS.set("ft-push-subscribed",true);
-                  }catch(e){console.warn("Push subscribe failed:",e);}
-                }
-              }
+                    const json=await res.json();
+                    if(res.ok){LS.set("ft-push-subscribed",true);SuccessToastCtrl.show("Push notifications active");}
+                    else{SuccessToastCtrl.show("Subscribe error: "+(json.error||res.status));}
+                  }catch(e){SuccessToastCtrl.show("Push failed: "+e.message);console.error("Push subscribe error:",e);}
+                }else{SuccessToastCtrl.show("Notifications enabled (local only)");}
+              }else{SuccessToastCtrl.show("Permission denied");}
             }else{alert("Notifications not supported in this browser.");}
           }}>{Icons.activity({size:14,color:V.bg})} Enable Notifications</Btn>
           <div style={{fontSize:10,color:V.text3,lineHeight:1.5}}>
