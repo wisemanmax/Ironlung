@@ -2237,7 +2237,8 @@ function SettingsTab({s,d}){
   const [newCat,setNewCat]=useState("Chest");
   const [newYt,setNewYt]=useState("");
   const [confirmClear,setConfirmClear]=useState(false);
-  const [open,setOpen]=useState(null); // which section is expanded
+  const [open,setOpen]=useState(null);
+  const [legalView,setLegalView]=useState(null);
 
   const saveGoals=()=>{
     d({type:"GOALS",g:{cal:parseInt(goals.cal)||2400,protein:parseInt(goals.protein)||180,carbs:parseInt(goals.carbs)||250,
@@ -2380,6 +2381,34 @@ function SettingsTab({s,d}){
         </div>
       </Row>
 
+      {/* Legal — expandable */}
+      <Row id="legal" icon={Icons.chevRight({size:16,color:V.text3})} label="Legal & Privacy"
+        desc="Terms, Privacy Policy, Data Rights">
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          <Btn v="secondary" full onClick={()=>setLegalView("tos")}>{Icons.chevRight({size:14,color:V.text2})} Terms of Service</Btn>
+          <Btn v="secondary" full onClick={()=>setLegalView("privacy")}>{Icons.chevRight({size:14,color:V.text2})} Privacy Policy</Btn>
+          <div style={{padding:"10px 12px",background:"rgba(255,255,255,0.02)",borderRadius:10,border:`1px solid ${V.cardBorder}`,marginTop:4}}>
+            <div style={{fontSize:12,fontWeight:600,color:V.text,marginBottom:4}}>Your Data Rights</div>
+            <div style={{fontSize:11,color:V.text3,lineHeight:1.6}}>
+              To request a copy of your data, opt out of data sales, or delete your account, email support@ironlog.space. We will respond within 30 days.
+            </div>
+          </div>
+          <a href="mailto:support@ironlog.space?subject=Do%20Not%20Sell%20My%20Personal%20Information&body=I%20would%20like%20to%20opt%20out%20of%20the%20sale%20of%20my%20personal%20information.%0A%0AEmail%20on%20account%3A%20" 
+            style={{display:"block",padding:"12px 16px",background:"rgba(255,107,107,0.06)",borderRadius:10,
+              border:"1px solid rgba(255,107,107,0.12)",textDecoration:"none",textAlign:"center"}}>
+            <div style={{fontSize:12,fontWeight:700,color:"#ff6b6b"}}>Do Not Sell My Personal Information</div>
+            <div style={{fontSize:10,color:V.text3,marginTop:2}}>Opens email to support@ironlog.space</div>
+          </a>
+        </div>
+      </Row>
+
+      {legalView&&(
+        <Sheet title={legalView==="tos"?"Terms of Service":"Privacy Policy"} onClose={()=>setLegalView(null)}>
+          {legalView==="tos"?<TOSContent/>:<PrivacyContent/>}
+          <Btn full onClick={()=>setLegalView(null)} s={{marginTop:16}}>Close</Btn>
+        </Sheet>
+      )}
+
       <Footer/>
     </div>
   );
@@ -2388,6 +2417,105 @@ function SettingsTab({s,d}){
 // ═══════════════════════════════════════
 //  MAIN APP
 // ═══════════════════════════════════════
+
+// ─── Legal Documents ───
+const LegalH=({children})=><div style={{fontSize:15,fontWeight:700,color:V.text,marginTop:16,marginBottom:6}}>{children}</div>;
+const LegalP=({children})=><div style={{fontSize:12,color:V.text2,lineHeight:1.7,marginBottom:10}}>{children}</div>;
+const LegalDate=()=><div style={{fontSize:10,color:V.text3,marginBottom:12}}>Last updated: March 4, 2026 · Version 1.0</div>;
+
+function TOSContent(){
+  return(
+    <div>
+      <LegalDate/>
+      <LegalP>Welcome to IRONLOG. By creating an account and using this application, you agree to the following terms. If you do not agree, do not create an account.</LegalP>
+
+      <LegalH>1. Acceptance of Terms</LegalH>
+      <LegalP>By accessing or using IRONLOG ("the App"), you agree to be bound by these Terms of Service ("Terms"). These Terms apply to all users of the App. IRONLOG is developed and operated by Byheir Wise ("we," "us," "our").</LegalP>
+
+      <LegalH>2. Account and Data</LegalH>
+      <LegalP>When you create a profile, you provide personal information including your name, email address, date of birth, sex, location, and fitness data. You agree that all information you provide is accurate and current. You are responsible for maintaining the accuracy of your profile.</LegalP>
+
+      <LegalH>3. Data Collection and Usage</LegalH>
+      <LegalP>We collect personal and fitness-related data as described in our Privacy Policy. By using the App, you consent to the collection, storage, processing, and use of your data as outlined in the Privacy Policy, including the potential sharing of aggregated or anonymized data with third-party partners for analytics, research, and commercial purposes.</LegalP>
+
+      <LegalH>4. Data Sharing and Sale</LegalH>
+      <LegalP>You acknowledge and agree that we may share, license, or sell aggregated and/or de-identified data derived from user information to third parties for commercial purposes, including but not limited to market research, fitness industry analytics, advertising, and product development. We may also share personally identifiable information with third-party service providers who assist in operating the App. See our Privacy Policy for full details and your opt-out rights.</LegalP>
+
+      <LegalH>5. User Rights</LegalH>
+      <LegalP>You have the right to: (a) access your personal data, (b) request correction of inaccurate data, (c) request deletion of your account and associated data, (d) opt out of the sale of your personal information, and (e) export your data at any time through the App's settings. To exercise any of these rights, contact us at support@ironlog.space.</LegalP>
+
+      <LegalH>6. Intellectual Property</LegalH>
+      <LegalP>All content, design, code, and branding in IRONLOG are owned by Byheir Wise. You may not copy, modify, distribute, or reverse-engineer any part of the App without written permission.</LegalP>
+
+      <LegalH>7. Disclaimer</LegalH>
+      <LegalP>IRONLOG is a fitness tracking tool, not a medical device. The App does not provide medical advice. Consult a healthcare professional before starting any fitness or nutrition program. We are not liable for any injuries, health issues, or damages resulting from use of the App. The App is provided "as is" without warranties of any kind.</LegalP>
+
+      <LegalH>8. Limitation of Liability</LegalH>
+      <LegalP>To the maximum extent permitted by law, Byheir Wise shall not be liable for any indirect, incidental, special, or consequential damages arising out of your use of the App, including but not limited to loss of data, personal injury, or loss of profits.</LegalP>
+
+      <LegalH>9. Modifications</LegalH>
+      <LegalP>We may update these Terms at any time. Continued use of the App after changes constitutes acceptance of the updated Terms. We will notify users of material changes through the App.</LegalP>
+
+      <LegalH>10. Governing Law</LegalH>
+      <LegalP>These Terms are governed by the laws of the State of Delaware. Any disputes shall be resolved in the courts of Delaware.</LegalP>
+
+      <LegalH>11. Contact</LegalH>
+      <LegalP>For questions about these Terms, contact us at support@ironlog.space or visit ironlog.space.</LegalP>
+    </div>
+  );
+}
+
+function PrivacyContent(){
+  return(
+    <div>
+      <LegalDate/>
+      <LegalP>IRONLOG ("the App") is developed and operated by Byheir Wise ("we," "us," "our"). This Privacy Policy explains what data we collect, how we use it, and your rights regarding that data.</LegalP>
+
+      <LegalH>1. Information We Collect</LegalH>
+      <LegalP><strong style={{color:V.text}}>Personal Information (provided by you):</strong> First name, last name, nickname, email address, date of birth, sex, state/region of residence, height, weight, fitness experience level, activity level, and workout availability.</LegalP>
+      <LegalP><strong style={{color:V.text}}>Fitness Data (generated through use):</strong> Workout logs, exercise history, nutrition entries, body measurements, progress photos, strength scores, and app usage patterns.</LegalP>
+      <LegalP><strong style={{color:V.text}}>Device Information:</strong> A unique device identifier generated at signup, IP address, browser type, and platform. Your IP address is collected automatically when you create or update your account.</LegalP>
+
+      <LegalH>2. How We Use Your Data</LegalH>
+      <LegalP>We use your data to: (a) personalize your experience within the App, (b) provide workout recommendations and progressive overload suggestions, (c) calculate strength scores and body composition metrics, (d) generate aggregated analytics and demographic insights, (e) improve the App's features and functionality, and (f) communicate updates about the App.</LegalP>
+
+      <LegalH>3. Data Sharing and Sale</LegalH>
+      <LegalP><strong style={{color:V.text}}>Aggregated/De-identified Data:</strong> We may share, license, or sell aggregated or de-identified data (data that cannot reasonably identify you) to third parties for commercial purposes, including market research, fitness industry analytics, advertising partnerships, and product development.</LegalP>
+      <LegalP><strong style={{color:V.text}}>Personal Data:</strong> We may share your personal information with: (a) service providers who help operate the App (e.g., hosting, database services), (b) third-party partners for direct marketing or targeted advertising, only if you have not opted out, and (c) law enforcement or regulatory authorities when required by law.</LegalP>
+      <LegalP><strong style={{color:V.text}}>We will never share:</strong> Your progress photos, workout notes, or raw fitness logs with any third party without your explicit, separate consent.</LegalP>
+
+      <LegalH>4. Your Rights</LegalH>
+      <LegalP>Depending on your state of residence, you may have the following rights:</LegalP>
+      <LegalP><strong style={{color:V.text}}>Right to Know:</strong> Request a copy of the personal data we hold about you.</LegalP>
+      <LegalP><strong style={{color:V.text}}>Right to Delete:</strong> Request deletion of your account and all associated personal data.</LegalP>
+      <LegalP><strong style={{color:V.text}}>Right to Opt Out of Sale:</strong> You may opt out of the sale of your personal information at any time by contacting support@ironlog.space or using the "Do Not Sell My Information" option in Settings.</LegalP>
+      <LegalP><strong style={{color:V.text}}>Right to Correct:</strong> Update or correct your personal information through the Edit Profile section in Settings.</LegalP>
+      <LegalP><strong style={{color:V.text}}>Right to Non-Discrimination:</strong> We will not discriminate against you for exercising any of your privacy rights.</LegalP>
+
+      <LegalH>5. Data Storage and Security</LegalH>
+      <LegalP>Your data is stored locally on your device and on secure cloud servers (Supabase, hosted in the United States). We use encryption in transit (HTTPS/TLS) and implement reasonable security measures to protect your data. However, no method of electronic storage is 100% secure.</LegalP>
+
+      <LegalH>6. Data Retention</LegalH>
+      <LegalP>We retain your personal data for as long as your account is active or as needed to provide services. If you request deletion, we will remove your data within 30 days, except where retention is required by law. Aggregated/de-identified data may be retained indefinitely.</LegalP>
+
+      <LegalH>7. Children's Privacy</LegalH>
+      <LegalP>IRONLOG is not intended for users under 16 years of age. We do not knowingly collect data from children under 16. If we learn that we have collected data from a child under 16, we will delete it promptly.</LegalP>
+
+      <LegalH>8. California Residents (CCPA)</LegalH>
+      <LegalP>If you are a California resident, you have additional rights under the California Consumer Privacy Act (CCPA), including the right to know what personal information is collected, the right to delete, and the right to opt out of the sale of personal information. To exercise these rights, contact support@ironlog.space.</LegalP>
+
+      <LegalH>9. Changes to This Policy</LegalH>
+      <LegalP>We may update this Privacy Policy from time to time. We will notify you of material changes through the App. Your continued use after changes constitutes acceptance.</LegalP>
+
+      <LegalH>10. Contact Us</LegalH>
+      <LegalP>For questions, data requests, or to exercise your rights, contact us at: support@ironlog.space or visit ironlog.space.</LegalP>
+
+      <LegalP style={{marginTop:16,padding:"10px 12px",background:`${V.accent}06`,borderRadius:8,border:`1px solid ${V.accent}15`}}>
+        <strong style={{color:V.accent}}>Summary:</strong> We collect your profile and fitness data to personalize the app. We may sell aggregated/anonymized data commercially. You can opt out of personal data sales anytime. You can delete your account anytime. We never share your photos or raw workout logs.
+      </LegalP>
+    </div>
+  );
+}
 
 // ─── Onboarding Flow ───
 function Onboarding({d}){
@@ -2398,6 +2526,8 @@ function Onboarding({d}){
   const [goals,setGoals]=useState({cal:"2400",protein:"180",carbs:"250",fat:"70",goalWeight:"175"});
   const [bw,setBw]=useState("");
   const [sending,setSending]=useState(false);
+  const [agreed,setAgreed]=useState(false);
+  const [showLegal,setShowLegal]=useState(null); // "tos" or "privacy"
   const [profile,setProfile]=useState({
     firstName:"",lastName:"",nickname:"",email:"",dob:"",sex:"",state:"",
     height:"",fitnessLevel:"",activityLevel:"",weeklyAvailability:""
@@ -2445,6 +2575,8 @@ function Onboarding({d}){
       units,split,
       goals:{cal:parseInt(goals.cal),protein:parseInt(goals.protein),carbs:parseInt(goals.carbs),fat:parseInt(goals.fat)},
       createdAt:new Date().toISOString(),
+      consentedAt:new Date().toISOString(),
+      consentVersion:"1.0",
       deviceId:uid(),
     };
 
@@ -2462,7 +2594,7 @@ function Onboarding({d}){
     setSending(false);
   };
 
-  const profileValid=profile.firstName.trim()&&profile.lastName.trim()&&profile.email.trim()&&profile.dob&&profile.sex&&profile.state;
+  const profileValid=profile.firstName.trim()&&profile.lastName.trim()&&profile.email.trim()&&profile.dob&&profile.sex&&profile.state&&agreed;
 
   const steps=[
     // Step 0: Welcome
@@ -2620,13 +2752,32 @@ function Onboarding({d}){
           </div>
         </div>
 
-        {/* Privacy note */}
-        <div style={{marginTop:14,padding:"10px 12px",background:"rgba(255,255,255,0.02)",borderRadius:10,
+        {/* Consent checkbox + legal links */}
+        <div style={{marginTop:14,padding:"12px 14px",background:"rgba(255,255,255,0.02)",borderRadius:12,
           border:`1px solid ${V.cardBorder}`}}>
-          <div style={{fontSize:10,color:V.text3,lineHeight:1.5}}>
-            Your data is stored securely and used only to personalize your experience and improve IRONLOG. We never sell your information.
-          </div>
+          <button onClick={()=>setAgreed(a=>!a)} style={{display:"flex",alignItems:"flex-start",gap:10,
+            background:"none",border:"none",cursor:"pointer",textAlign:"left",WebkitTapHighlightColor:"transparent",width:"100%",padding:0}}>
+            <div style={{width:20,height:20,borderRadius:5,border:`2px solid ${agreed?V.accent:V.text3}`,
+              background:agreed?V.accent:"transparent",display:"flex",alignItems:"center",justifyContent:"center",
+              flexShrink:0,marginTop:1,transition:"all .2s"}}>
+              {agreed&&<span style={{color:V.bg,fontSize:13,fontWeight:900,lineHeight:1}}>✓</span>}
+            </div>
+            <div style={{fontSize:12,color:V.text2,lineHeight:1.6}}>
+              I agree to the{" "}
+              <span onClick={e=>{e.stopPropagation();setShowLegal("tos");}} style={{color:V.accent,textDecoration:"underline",fontWeight:600}}>Terms of Service</span>
+              {" "}and{" "}
+              <span onClick={e=>{e.stopPropagation();setShowLegal("privacy");}} style={{color:V.accent,textDecoration:"underline",fontWeight:600}}>Privacy Policy</span>
+            </div>
+          </button>
         </div>
+
+        {/* Inline legal document viewer */}
+        {showLegal&&(
+          <Sheet title={showLegal==="tos"?"Terms of Service":"Privacy Policy"} onClose={()=>setShowLegal(null)}>
+            {showLegal==="tos"?<TOSContent/>:<PrivacyContent/>}
+            <Btn full onClick={()=>setShowLegal(null)} s={{marginTop:16}}>Close</Btn>
+          </Sheet>
+        )}
 
         <Btn full onClick={finish} disabled={!profileValid||sending} s={{marginTop:16}}>
           {sending?(
@@ -2642,7 +2793,7 @@ function Onboarding({d}){
 
         {!profileValid&&(
           <div style={{fontSize:11,color:V.text3,textAlign:"center",marginTop:8}}>
-            Please fill in all required fields (*)
+            {!agreed?"Please agree to the Terms of Service and Privacy Policy":"Please fill in all required fields (*)"}
           </div>
         )}
       </div>
