@@ -6172,6 +6172,7 @@ function App(){
 
   // Feature tour state (must be before any conditional returns — rules of hooks)
   const [tourStep,setTourStep]=useState(LS.get("ft-tour-done")?-1:0);
+  const [showNotifPrompt,setShowNotifPrompt]=useState(false);
   const tourSteps=[
     {title:"Welcome to IRONLOG!",msg:"Here's a quick tour of your new fitness tracker.",icon:"🎉",target:"home"},
     {title:"Log Workouts",msg:"Tap the + button to log exercises with sets, reps, and weight. Your PRs are tracked automatically.",icon:"💪",target:"log"},
@@ -6181,7 +6182,39 @@ function App(){
     {title:"Cloud Sync",msg:"Your data syncs automatically. Everything works offline too — it'll sync when you reconnect.",icon:"☁️",target:"settings"},
     {title:"You're all set!",msg:"Start by logging your first workout. The app gets smarter as you use it.",icon:"🚀",target:"home"},
   ];
-  const closeTour=()=>{setTourStep(-1);LS.set("ft-tour-done",true);};
+  const closeTour=()=>{
+    setTourStep(-1);LS.set("ft-tour-done",true);
+    // Always show notification prompt after tour (skip or complete)
+    if(!LS.get("ft-notif-prompted")){
+      setTimeout(()=>setShowNotifPrompt(true),600);
+    }
+  };
+
+  const handleNotifAccept=async()=>{
+    LS.set("ft-notif-prompted",true);
+    if("Notification" in window){
+      const perm=await Notification.requestPermission();
+      if(perm==="granted"){
+        LS.set("ft-reminders",true);
+        SuccessToastCtrl.show("Notifications enabled");
+        // Trigger push subscription
+        if(navigator.serviceWorker?.controller){
+          navigator.serviceWorker.ready.then(reg=>{
+            reg.showNotification("IRONLOG",{
+              body:"You're all set — we'll send smart reminders for workouts, meals, and check-ins.",
+              icon:"./icon.svg",badge:"./icon.svg",tag:"welcome"
+            });
+          });
+        }
+      }
+    }
+    setShowNotifPrompt(false);
+  };
+
+  const handleNotifDecline=()=>{
+    LS.set("ft-notif-prompted",true);
+    setShowNotifPrompt(false);
+  };
 
   // Show onboarding if first launch
   if(s.loaded&&!s.onboarded) return <Onboarding d={d}/>;
@@ -6383,6 +6416,121 @@ function App(){
                 style={{flex:1,padding:"10px",borderRadius:10,background:V.accent,border:"none",cursor:"pointer",
                   fontSize:12,fontWeight:700,color:V.bg,fontFamily:V.font}}>
                 {tourStep>=tourSteps.length-1?"Let's Go!":"Next"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Push Notification Prompt — shows after tour ends */}
+      {showNotifPrompt&&(
+        <div style={{position:"fixed",inset:0,zIndex:2000,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+          <div style={{position:"absolute",inset:0,background:"rgba(0,0,0,.8)",backdropFilter:"blur(8px)"}}/>
+          <div role="dialog" aria-modal="true" aria-label="Enable notifications" style={{position:"relative",
+            background:"linear-gradient(180deg,#1a1a28,#0e0e16)",borderRadius:20,padding:28,maxWidth:340,width:"100%",
+            border:`1px solid ${V.accent}20`,textAlign:"center",maxHeight:"85vh",overflowY:"auto"}}>
+            <div style={{width:64,height:64,borderRadius:16,background:`linear-gradient(135deg,${V.accent}20,${V.accent2}20)`,
+              display:"inline-flex",alignItems:"center",justifyContent:"center",marginBottom:16}}>
+              <span style={{fontSize:32}}>🔔</span>
+            </div>
+            <div style={{fontSize:20,fontWeight:800,color:V.text,marginBottom:8}}>Stay on Track</div>
+            <div style={{fontSize:13,color:V.text3,lineHeight:1.6,marginBottom:8}}>
+              IRONLOG sends smart reminders based on your schedule — workout days, meal times, check-ins, and hydration.
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:20,textAlign:"left",
+              padding:"12px 16px",background:"rgba(255,255,255,0.02)",borderRadius:12,border:`1px solid ${V.cardBorder}`}}>
+              {[
+                {icon:"💪",text:"Workout reminders on training days"},
+                {icon:"🥗",text:"Breakfast, lunch & dinner logging nudges"},
+                {icon:"💧",text:"Hydration check-ins through the day"},
+                {icon:"📊",text:"Daily readiness check-in prompts"},
+                {icon:"🤫",text:"Quiet hours 10pm–7am — we respect your sleep"},
+              ].map((item,i)=>(
+                <div key={i} style={{display:"flex",alignItems:"center",gap:8,padding:"4px 0"}}>
+                  <span style={{fontSize:14}}>{item.icon}</span>
+                  <span style={{fontSize:11,color:V.text2}}>{item.text}</span>
+                </div>
+              ))}
+            </div>
+            <button onClick={async()=>{
+              LS.set("ft-notif-prompted",true);
+              if("Notification" in window){
+                const perm=await Notification.requestPermission();
+                if(perm==="granted"){
+                  LS.set("ft-reminders",true);
+                  SuccessToastCtrl.show("Notifications enabled");
+                  if(navigator.serviceWorker?.controller){
+                    navigator.serviceWorker.ready.then(async(reg)=>{
+                      try{
+                        const vk="BMZyIUQO08nuR7afvqNIWBK_ZOcr7PHwT2YwIxTa_ONwAD1YCaJ8Qkb4q4TTYSx_sTN-7-5vCzR8ApNZuyg-Ttc";
+                        const sub=await reg.pushManager.subscribe({userVisibleOnly:true,
+                          applicationServerKey:Uint8Array.from(atob(vk),c=>c.charCodeAt(0))});
+                        await fetch(`${SYNC_URL}/api/push/subscribe`,{method:"POST",
+                          headers:AuthToken.getHeaders(s.profile?.email||""),
+                          body:JSON.stringify({email:s.profile?.email,subscription:sub.toJSON()})});
+                        LS.set("ft-push-subscribed",true);
+                      }catch(e){}
+                    });
+                  }
+                }
+              }
+              setShowNotifPrompt(false);
+            }} style={{width:"100%",padding:"14px",borderRadius:12,background:V.accent,border:"none",
+              cursor:"pointer",fontSize:15,fontWeight:700,color:V.bg,fontFamily:V.font,marginBottom:8}}>
+              Enable Smart Notifications
+            </button>
+            <button onClick={()=>{LS.set("ft-notif-prompted",true);setShowNotifPrompt(false);}}
+              style={{width:"100%",padding:"10px",borderRadius:10,background:"transparent",
+                border:`1px solid ${V.cardBorder}`,cursor:"pointer",fontSize:12,color:V.text3,fontFamily:V.font}}>
+              Maybe Later
+            </button>
+            <div style={{fontSize:9,color:V.text3,marginTop:10,opacity:0.5}}>You can change this anytime in Settings</div>
+          </div>
+        </div>
+      )}
+      {/* Push Notification Prompt — shown after tour */}
+      {showNotifPrompt&&(
+        <div style={{position:"fixed",inset:0,zIndex:2000,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+          <div style={{position:"absolute",inset:0,background:"rgba(0,0,0,.8)",backdropFilter:"blur(8px)"}}/>
+          <div role="alertdialog" aria-modal="true" aria-label="Enable notifications" style={{position:"relative",
+            background:"linear-gradient(180deg,#1a1a28,#0e0e16)",borderRadius:20,padding:28,maxWidth:340,width:"100%",
+            border:`1px solid ${V.accent}25`,textAlign:"center"}}>
+            <div style={{width:64,height:64,borderRadius:18,background:`linear-gradient(135deg,${V.accent}20,${V.accent2}20)`,
+              display:"inline-flex",alignItems:"center",justifyContent:"center",marginBottom:16}}>
+              <span style={{fontSize:32}}>🔔</span>
+            </div>
+            <div style={{fontSize:19,fontWeight:800,color:V.text,marginBottom:8}}>Stay on Track</div>
+            <div style={{fontSize:13,color:V.text2,lineHeight:1.6,marginBottom:8}}>
+              Enable smart notifications and IRONLOG will remind you to:
+            </div>
+            <div style={{textAlign:"left",padding:"12px 16px",background:"rgba(255,255,255,0.02)",borderRadius:12,
+              border:`1px solid ${V.cardBorder}`,marginBottom:16}}>
+              {[
+                {icon:"💪",text:"Log your workouts on training days"},
+                {icon:"🥗",text:"Track breakfast, lunch & dinner"},
+                {icon:"💧",text:"Stay hydrated throughout the day"},
+                {icon:"📊",text:"Complete your daily readiness check-in"},
+                {icon:"🔥",text:"Keep your streak alive"},
+              ].map((item,i)=>(
+                <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"6px 0",
+                  borderBottom:i<4?`1px solid rgba(255,255,255,0.03)`:"none"}}>
+                  <span style={{fontSize:16}}>{item.icon}</span>
+                  <span style={{fontSize:12,color:V.text}}>{item.text}</span>
+                </div>
+              ))}
+            </div>
+            <div style={{fontSize:11,color:V.accent,fontWeight:600,marginBottom:16,lineHeight:1.5}}>
+              Users with notifications enabled are 3x more likely to hit their goals
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+              <button onClick={handleNotifAccept} style={{width:"100%",padding:"14px",borderRadius:12,
+                background:`linear-gradient(135deg,${V.accent},${V.accent2})`,border:"none",cursor:"pointer",
+                fontSize:14,fontWeight:700,color:V.bg,fontFamily:V.font}}>
+                Enable Notifications
+              </button>
+              <button onClick={handleNotifDecline} style={{width:"100%",padding:"10px",borderRadius:10,
+                background:"transparent",border:"none",cursor:"pointer",
+                fontSize:12,color:V.text3,fontFamily:V.font}}>
+                Maybe later
               </button>
             </div>
           </div>
