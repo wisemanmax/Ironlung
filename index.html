@@ -5884,10 +5884,7 @@ function App(){
     }
   },[s.loaded,s.onboarded]);
 
-  // Show onboarding if first launch
-  if(s.loaded&&!s.onboarded) return <Onboarding d={d}/>;
-
-  // Feature tour after first onboarding
+  // Feature tour state (must be before any conditional returns — rules of hooks)
   const [tourStep,setTourStep]=useState(LS.get("ft-tour-done")?-1:0);
   const tourSteps=[
     {title:"Welcome to IRONLOG!",msg:"Here's a quick tour of your new fitness tracker.",icon:"🎉",target:"home"},
@@ -5899,6 +5896,9 @@ function App(){
     {title:"You're all set!",msg:"Start by logging your first workout. The app gets smarter as you use it.",icon:"🚀",target:"home"},
   ];
   const closeTour=()=>{setTourStep(-1);LS.set("ft-tour-done",true);};
+
+  // Show onboarding if first launch
+  if(s.loaded&&!s.onboarded) return <Onboarding d={d}/>;
 
   // Back button component for sub-pages
   const SubBack=({to,label})=>(
