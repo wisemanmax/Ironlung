@@ -2,13 +2,13 @@
   "name": "IRONLOG Fitness Tracker",
   "short_name": "IRONLOG",
   "description": "Complete workout, nutrition, and body tracking app",
-  "start_url": "./index.html",
+  "start_url": "./",
+  "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#08080d",
   "theme_color": "#00f5a0",
   "icons": [
-    {"src": "./icon-180.png", "sizes": "180x180", "type": "image/png", "purpose": "any maskable"},
-    {"src": "./icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}
+    {"src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable"}
   ]
 }
