@@ -28,6 +28,7 @@ input[type=number]{-moz-appearance:textfield}
 @keyframes spin{to{transform:rotate(360deg)}}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.3}}
 @media(prefers-reduced-motion:reduce){*{animation-duration:0.01ms!important;animation-iteration-count:1!important;transition-duration:0.01ms!important;}}
+@keyframes fadeInDown{from{opacity:0;transform:translateX(-50%) translateY(-10px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
 </style>
 </head>
 <body>
@@ -676,6 +677,7 @@ function UndoToast({d}){
     else if(u.type==="body")d({type:"ADD_B",b:u.item});
     else if(u.type==="photo")d({type:"ADD_PHOTO",photo:u.item});
     Undo.clear();setItem(null);
+    SuccessToastCtrl.show("Restored");
   };
   return(
     <div style={{position:"fixed",bottom:80,left:"50%",transform:"translateX(-50%)",zIndex:1500,
@@ -684,6 +686,33 @@ function UndoToast({d}){
       <span style={{fontSize:12,color:V.text}}>{item.label}</span>
       <button onClick={doUndo} style={{padding:"4px 12px",borderRadius:6,background:V.accent,border:"none",
         cursor:"pointer",fontSize:11,fontWeight:700,color:V.bg,fontFamily:V.font}}>Undo</button>
+    </div>
+  );
+}
+
+// ─── Success Toast System ───
+let _successMsg=null;let _successTimer=null;
+const SuccessToastCtrl={
+  show:(msg)=>{_successMsg={msg,ts:Date.now()};if(_successTimer)clearTimeout(_successTimer);_successTimer=setTimeout(()=>{_successMsg=null;},2500);},
+  get:()=>_successMsg,
+};
+
+function SuccessToast(){
+  const [msg,setMsg]=useState(null);
+  useEffect(()=>{
+    const iv=setInterval(()=>{setMsg(SuccessToastCtrl.get());},150);
+    return()=>clearInterval(iv);
+  },[]);
+  if(!msg)return null;
+  return(
+    <div style={{position:"fixed",top:60,left:"50%",transform:"translateX(-50%)",zIndex:1500,
+      padding:"10px 20px",background:"rgba(0,245,160,0.12)",borderRadius:12,border:`1px solid ${V.accent}30`,
+      display:"flex",alignItems:"center",gap:8,boxShadow:"0 4px 20px rgba(0,0,0,0.3)",
+      backdropFilter:"blur(12px)",animation:"fadeInDown .25s ease-out"}}>
+      <div style={{width:20,height:20,borderRadius:10,background:V.accent,display:"flex",alignItems:"center",justifyContent:"center"}}>
+        <span style={{color:V.bg,fontSize:12,fontWeight:900}}>✓</span>
+      </div>
+      <span style={{fontSize:13,fontWeight:600,color:V.text}}>{msg.msg}</span>
     </div>
   );
 }
@@ -1431,6 +1460,7 @@ function CheckinModal({s,d,onClose}){
       sleep:parseFloat(sleep)||0,notes,
       timestamp:new Date().toISOString()
     }});
+    SuccessToastCtrl.show("Check-in logged");
     onClose();
   };
 
@@ -1962,8 +1992,8 @@ function WorkoutTab({s,d}){
       ex.sets.forEach(st=>{const e1rm=calc1RM(st.weight,st.reps);const prev=prs[ex.exerciseId];
         if(st.weight>0&&(!prev||e1rm>prev.e1rm))detected.push({name,weight:st.weight,reps:st.reps,e1rm});});});
     setNewPRs(detected);
-    if(editingId){d({type:"EDIT_W",w});setEditingId(null);}
-    else d({type:"ADD_W",w});
+    if(editingId){d({type:"EDIT_W",w});setEditingId(null);SuccessToastCtrl.show("Workout updated");}
+    else{d({type:"ADD_W",w});SuccessToastCtrl.show("Workout logged");}
     setStartTime(null);
     if(detected.length===0)setShow(false);
   };
@@ -2121,7 +2151,7 @@ function WorkoutTab({s,d}){
 
       {/* Delete confirmation */}
       {confirmDel&&<ConfirmDialog msg="Delete workout?" detail={`${fmtFull(confirmDel.date)} — this cannot be undone.`}
-        onConfirm={()=>{Undo.set("Workout deleted",confirmDel,"workout");d({type:"DEL_W",id:confirmDel.id});setConfirmDel(null);}}
+        onConfirm={()=>{Undo.set("Workout deleted",confirmDel,"workout");d({type:"DEL_W",id:confirmDel.id});setConfirmDel(null);SuccessToastCtrl.show("Workout deleted");}}
         onCancel={()=>setConfirmDel(null)}/>}
 
       {/* History */}
@@ -2239,6 +2269,7 @@ function NutritionTab({s,d}){
     if(warnings.length>0&&!valWarnings){setValWarnings(warnings);return;}
     setValWarnings(null);
     d({type:"ADD_N",n});
+    SuccessToastCtrl.show("Nutrition logged");
     setShow(false);
   };
 
@@ -2375,6 +2406,7 @@ function BodyTab({s,d}){
   const save=()=>{
     d({type:"ADD_B",b:{id:uid(),date:form.date,weight:parseFloat(form.weight)||0,bf:parseFloat(form.bf)||0,
       chest:parseFloat(form.chest)||0,waist:parseFloat(form.waist)||0,arms:parseFloat(form.arms)||0,thighs:parseFloat(form.thighs)||0}});
+    SuccessToastCtrl.show("Measurement saved");
     setShow(false);
   };
 
@@ -2965,6 +2997,7 @@ function SettingsTab({s,d}){
     d({type:"GOALS",g:{cal:parseInt(goals.cal)||2400,protein:parseInt(goals.protein)||180,carbs:parseInt(goals.carbs)||250,
       fat:parseInt(goals.fat)||70,goalWeight:parseInt(goals.goalWeight)||175}});
     setSaved(true);setTimeout(()=>setSaved(false),2000);
+    SuccessToastCtrl.show("Goals saved");
   };
 
   const addEx=()=>{
@@ -2976,6 +3009,7 @@ function SettingsTab({s,d}){
     else if(ytId.includes("youtube.com/shorts/")){ytId=ytId.split("shorts/")[1]?.split(/[?&]/)[0]||"";}
     if(!ytId)return;
     d({type:"ADD_EX",ex:{id:uid(),name:newEx.trim(),cat:newCat,yt:ytId}});
+    SuccessToastCtrl.show("Exercise added");
     setNewEx("");setNewYt("");
   };
 
@@ -3268,9 +3302,9 @@ function SettingsTab({s,d}){
       </div>
 
       {legalView&&(
-        <Sheet title={legalView==="tos"?"Terms of Service":"Privacy Policy"} onClose={()=>setLegalView(null)}>
+        <Sheet title={legalView==="tos"?"Terms of Service":"Privacy Policy"} onClose={()=>setLegalView(null)}
+          footer={<Btn full onClick={()=>setLegalView(null)}>Close</Btn>}>
           {legalView==="tos"?<TOSContent/>:<PrivacyContent/>}
-          <Btn full onClick={()=>setLegalView(null)} s={{marginTop:16}}>Close</Btn>
         </Sheet>
       )}
 
@@ -3640,9 +3674,9 @@ function Onboarding({d}){
 
         {/* Inline legal document viewer */}
         {showLegal&&(
-          <Sheet title={showLegal==="tos"?"Terms of Service":"Privacy Policy"} onClose={()=>setShowLegal(null)}>
+          <Sheet title={showLegal==="tos"?"Terms of Service":"Privacy Policy"} onClose={()=>setShowLegal(null)}
+            footer={<Btn full onClick={()=>setShowLegal(null)}>Close</Btn>}>
             {showLegal==="tos"?<TOSContent/>:<PrivacyContent/>}
-            <Btn full onClick={()=>setShowLegal(null)} s={{marginTop:16}}>Close</Btn>
           </Sheet>
         )}
 
@@ -3767,6 +3801,7 @@ function ProgressPhotos({s,d}){
     if(compressed){
       d({type:"ADD_PHOTO",photo:{id:uid(),date:today(),data:compressed,note:"",
         size:compressed.length,original:file.name}});
+      SuccessToastCtrl.show("Photo saved");
     }
     setCompressing(false);
     e.target.value=""; // reset input
@@ -3816,6 +3851,7 @@ function ProfileEditor({s,d}){
   const saveProfile=async()=>{
     d({type:"SET_PROFILE",profile:form});
     setSaved(true);
+    SuccessToastCtrl.show("Profile updated");
 
     // Sync to backend
     setSyncing(true);
@@ -4521,12 +4557,13 @@ function GoalEngine({s,d}){
       label:form.label||`${form.type==="weight"?"Reach":"Hit"} ${form.target}`,
       created:today(),completed:false};
     d({type:"SET_MILESTONES",milestones:[...goals,g]});
+    SuccessToastCtrl.show("Goal created");
     setForm({type:"weight",target:"",deadline:"",label:""});
     setShowAdd(false);
   };
 
-  const deleteGoal=(id)=>d({type:"SET_MILESTONES",milestones:goals.filter(g=>g.id!==id)});
-  const completeGoal=(id)=>d({type:"SET_MILESTONES",milestones:goals.map(g=>g.id===id?{...g,completed:true,completedDate:today()}:g)});
+  const deleteGoal=(id)=>{d({type:"SET_MILESTONES",milestones:goals.filter(g=>g.id!==id)});SuccessToastCtrl.show("Goal deleted");};
+  const completeGoal=(id)=>{d({type:"SET_MILESTONES",milestones:goals.map(g=>g.id===id?{...g,completed:true,completedDate:today()}:g)});SuccessToastCtrl.show("Goal completed! 🎉");};
 
   const calcProgress=(g)=>{
     if(g.type==="weight"){
@@ -5170,11 +5207,12 @@ function PhaseTracker({s,d}){
     if(!form.start)return;
     const p={id:uid(),type:form.type,start:form.start,end:form.end||null,notes:form.notes,active:!form.end};
     d({type:"SET_PHASES",phases:[...phases,p]});
+    SuccessToastCtrl.show("Phase started");
     setForm({type:"cut",start:today(),end:"",notes:""});setShowAdd(false);
   };
 
-  const endPhase=(id)=>d({type:"SET_PHASES",phases:phases.map(p=>p.id===id?{...p,end:today(),active:false}:p)});
-  const deletePhase=(id)=>d({type:"SET_PHASES",phases:phases.filter(p=>p.id!==id)});
+  const endPhase=(id)=>{d({type:"SET_PHASES",phases:phases.map(p=>p.id===id?{...p,end:today(),active:false}:p)});SuccessToastCtrl.show("Phase ended");};
+  const deletePhase=(id)=>{d({type:"SET_PHASES",phases:phases.filter(p=>p.id!==id)});SuccessToastCtrl.show("Phase deleted");};
 
   const phaseStats=(phase)=>{
     const ws=s.workouts.filter(w=>w.date>=phase.start&&(!phase.end||w.date<=phase.end));
@@ -5408,11 +5446,12 @@ function InjuryManager({s,d}){
   const addInjury=()=>{
     if(!form.joint)return;
     d({type:"SET_INJURIES",injuries:[...injuries,{id:uid(),joint:form.joint,severity:form.severity,notes:form.notes,date:today(),active:true}]});
+    SuccessToastCtrl.show("Injury flagged");
     setForm({joint:"",severity:"moderate",notes:""});setShowAdd(false);
   };
 
-  const resolveInjury=(id)=>d({type:"SET_INJURIES",injuries:injuries.map(inj=>inj.id===id?{...inj,active:false,resolved:today()}:inj)});
-  const deleteInjury=(id)=>d({type:"SET_INJURIES",injuries:injuries.filter(inj=>inj.id!==id)});
+  const resolveInjury=(id)=>{d({type:"SET_INJURIES",injuries:injuries.map(inj=>inj.id===id?{...inj,active:false,resolved:today()}:inj)});SuccessToastCtrl.show("Injury resolved");};
+  const deleteInjury=(id)=>{d({type:"SET_INJURIES",injuries:injuries.filter(inj=>inj.id!==id)});SuccessToastCtrl.show("Injury removed");};
 
   const activeInjuries=injuries.filter(inj=>inj.active);
   const flaggedExercises=useMemo(()=>{
@@ -5713,6 +5752,7 @@ function FastFoodHacks({s,d}){
     const n={id:uid(),date:today(),cal:hack.cal||0,protein:hack.p||0,carbs:0,fat:0,fiber:0,water:0,sleep:0,
       meals:[{name:"Fast Food",items:[{name:`${hack.r} Hack`,cal:hack.cal||0,protein:hack.p||0,carbs:0,fat:0}]}]};
     d({type:"ADD_N",n});
+    SuccessToastCtrl.show(`${hack.r} hack logged`);
   };
 
   return(
@@ -6028,65 +6068,107 @@ function App(){
     return()=>navigator.serviceWorker?.removeEventListener("message",handler);
   },[]);
 
-  // Reminder notifications with action buttons + #8 quiet hours
+  // ─── Smart Notification Engine ───
   useEffect(()=>{
     if(!s.loaded||!s.onboarded||!LS.get("ft-reminders"))return;
-    const lastReminder=LS.get("ft-last-reminder");
-    const td=today();
-    if(lastReminder===td)return;
-    // #8 Quiet hours (10pm-7am)
     const hr=new Date().getHours();
+    // Quiet hours
     if(hr>=22||hr<7)return;
-    LS.set("ft-last-reminder",td);
+    
+    const td=today();
     const dow=new Date().getDay();
     const todayType=s.schedule.overrides[td]||s.schedule.weekly[dow]||"Rest";
-    const hasCheckin=(s.checkins||[]).some(c=>c.date===td);
     const hasWorkout=s.workouts.some(w=>w.date===td);
+    const hasCheckin=(s.checkins||[]).some(c=>c.date===td);
+    const todayNutrition=s.nutrition.find(n=>n.date===td);
+    const hasMeals=todayNutrition?.meals?.some(m=>(m.items||[]).length>0);
+
+    // Analyze user patterns for smart timing
+    const recentWorkoutHours=s.workouts.slice(0,14).map(w=>{
+      // Estimate workout time from date order (rough heuristic)
+      return null; // Would need actual timestamps
+    }).filter(Boolean);
+
+    // Build notification queue based on time of day + what's missing
+    const queue=[];
+    const lastNotifKey=`ft-notif-${td}-${hr}`;
+    if(LS.get(lastNotifKey))return; // Already notified this hour block
+
+    if(hr>=6&&hr<=9&&!hasMeals){
+      queue.push({tag:"meal-breakfast",body:"Good morning! Log your breakfast to stay on track.",
+        actions:[{action:"log_nutrition",title:"Log Breakfast"},{action:"dismiss",title:"Later"}]});
+    }
+    if(hr>=11&&hr<=13&&todayNutrition&&!todayNutrition.meals?.find(m=>m.name==="Lunch"&&(m.items||[]).length>0)){
+      queue.push({tag:"meal-lunch",body:"Lunchtime — log what you're eating to hit your macro goals.",
+        actions:[{action:"log_nutrition",title:"Log Lunch"},{action:"dismiss",title:"Later"}]});
+    }
+    if(hr>=14&&hr<=17&&todayType!=="Rest"&&!hasWorkout){
+      queue.push({tag:"workout-reminder",body:`${todayType} day — time to get after it!`,
+        actions:[{action:"log_workout",title:"Log Workout"},{action:"dismiss",title:"Skip Today"}]});
+    }
+    if(hr>=17&&hr<=20&&todayNutrition&&!todayNutrition.meals?.find(m=>m.name==="Dinner"&&(m.items||[]).length>0)){
+      queue.push({tag:"meal-dinner",body:"Don't forget to log dinner — you're close to your daily goals.",
+        actions:[{action:"log_nutrition",title:"Log Dinner"},{action:"dismiss",title:"Later"}]});
+    }
+    if(hr>=19&&hr<=21&&!hasCheckin){
+      queue.push({tag:"checkin-reminder",body:"Quick 30-sec check-in — how are you feeling today?",
+        actions:[{action:"checkin",title:"Check In"},{action:"dismiss",title:"Later"}]});
+    }
+    if(hr>=13&&hr<=16){
+      const waterCups=todayNutrition?.water||0;
+      if(waterCups<4){
+        queue.push({tag:"hydration",body:`You've logged ${waterCups} cups of water today. Stay hydrated!`,
+          actions:[{action:"log_nutrition",title:"Log Water"},{action:"dismiss",title:"Done"}]});
+      }
+    }
+
+    if(queue.length===0)return;
+    LS.set(lastNotifKey,true);
 
     if("Notification" in window&&Notification.permission==="granted"&&navigator.serviceWorker?.controller){
-      // Use SW for rich notifications with action buttons
       navigator.serviceWorker.ready.then(reg=>{
-        if(todayType!=="Rest"&&!hasWorkout){
-          setTimeout(()=>reg.showNotification("IRONLOG",{
-            body:`${todayType} day — time to get after it!`,
-            icon:"./icon.svg",badge:"./icon.svg",
-            tag:"workout-reminder",
-            vibrate:[100,50,100],
-            actions:[
-              {action:"log_workout",title:"Log Workout"},
-              {action:"dismiss",title:"Skip Today"}
-            ]
-          }),2000);
-        }
-        if(!hasCheckin){
-          setTimeout(()=>reg.showNotification("IRONLOG",{
-            body:"Quick 30-sec check-in — how are you feeling?",
-            icon:"./icon.svg",badge:"./icon.svg",
-            tag:"checkin-reminder",
-            actions:[
-              {action:"checkin",title:"Check In"},
-              {action:"dismiss",title:"Later"}
-            ]
-          }),6000);
-        }
-        // Hydration reminder in afternoon
-        const hr=new Date().getHours();
-        if(hr>=13&&hr<=16){
-          const tn=s.nutrition.find(n=>n.date===td);
-          if(!tn||tn.water<4){
-            setTimeout(()=>reg.showNotification("IRONLOG",{
-              body:"Stay hydrated — log your water intake",
-              icon:"./icon.svg",badge:"./icon.svg",
-              tag:"hydration",
-              actions:[
-                {action:"log_nutrition",title:"Log Water"},
-                {action:"dismiss",title:"Done"}
-              ]
-            }),10000);
-          }
-        }
+        // Send first queued notification (don't spam)
+        const notif=queue[0];
+        setTimeout(()=>reg.showNotification("IRONLOG",{
+          body:notif.body,icon:"./icon.svg",badge:"./icon.svg",
+          tag:notif.tag,vibrate:[100,50,100],
+          actions:notif.actions
+        }),2000);
       });
     }
+  },[s.loaded,s.onboarded]);
+
+  // ─── Web Push Subscription (for server-sent notifications) ───
+  useEffect(()=>{
+    if(!s.loaded||!s.onboarded||!s.profile?.email)return;
+    if(!("serviceWorker" in navigator)||!("PushManager" in window))return;
+    // Only subscribe once
+    if(LS.get("ft-push-subscribed"))return;
+
+    navigator.serviceWorker.ready.then(async(reg)=>{
+      try{
+        // Check if already subscribed
+        const existing=await reg.pushManager.getSubscription();
+        if(existing){LS.set("ft-push-subscribed",true);return;}
+
+        // Subscribe with VAPID key (you'll set this up)
+        const vapidKey=LS.get("ft-vapid-public");
+        if(!vapidKey)return; // No VAPID key configured yet
+
+        const sub=await reg.pushManager.subscribe({
+          userVisibleOnly:true,
+          applicationServerKey:Uint8Array.from(atob(vapidKey),c=>c.charCodeAt(0)),
+        });
+
+        // Send subscription to backend
+        await fetch(`${SYNC_URL}/api/push/subscribe`,{
+          method:"POST",
+          headers:AuthToken.getHeaders(s.profile.email),
+          body:JSON.stringify({email:s.profile.email,subscription:sub.toJSON()}),
+        });
+        LS.set("ft-push-subscribed",true);
+      }catch(e){/* Push subscription not supported or denied */}
+    });
   },[s.loaded,s.onboarded]);
 
   // Feature tour state (must be before any conditional returns — rules of hooks)
@@ -6279,6 +6361,7 @@ function App(){
         })}
       </nav>
       <UndoToast d={d}/>
+      <SuccessToast/>
       {/* Feature Tour Overlay */}
       {tourStep>=0&&tourStep<tourSteps.length&&(
         <div style={{position:"fixed",inset:0,zIndex:2000,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
