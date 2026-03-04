@@ -5617,6 +5617,210 @@ function WeeklySummary({s}){
   );
 }
 
+// ─── Fast Food Hacks Database ───
+const FF_HACKS=[
+{r:"Arby's",cal:505,p:24,d:"Classic Beef and Cheddar Sandwich in a bowl\nNO BUN (240cals)\nSNACK SIZE Curly Fry (250cals)\n1 Arby's Sauce (15cals)"},
+{r:"Buc-ee's",cal:500,p:26,d:"Wilde Protein Chips (170cals)\nJalapeño Cheddar Meat Stick (190 cals)\nOh Snap Sassy Bites (60 cals)\nAlani Gummy Bears (80 cals)"},
+{r:"Cava",cal:540,p:40,d:"Half Greens/Half Grains Bowl: Super greens, Black Lentils, Harissa Honey Chicken, Fire Roasted Corn, Pickles, Pickled Onions, Tomato & Onions, Shredded Romaine, Yogurt Dill"},
+{r:"Chicken Salad Chick",cal:460,p:20,d:"1 Scoop Jalapeno Holly Chicken Salad with lettuce leaves, tomato, bacon, pickle. Split into 2 lettuce wraps."},
+{r:"Chick-fil-A",cal:390,p:30,d:"Egg White Griller Muffin (sub pepper jack), fruit cup instead of hash browns, Texas Pete, large half unsweet tea/lemonade"},
+{r:"Chick-fil-A",cal:495,p:50,d:"12ct Grilled Nugget Meal, sub SMALL Mac & Cheese for fries. 1 Zesty Buffalo, 2 Texas Pete. Dip buffalo nuggets into mac & cheese."},
+{r:"Chick-fil-A",cal:325,p:42,d:"BBQ Chicken Salad: 12ct Grilled Nuggets, sub side salad for fries, 1 BBQ Sauce, 2 Texas Pete, pickles. Shake into salad!"},
+{r:"Chick-fil-A",cal:535,p:35,d:"Small Fry (320cal), 8ct Grilled Nuggets (130cal), side bacon crumbles (35cal), side cheese (50cal), Texas Pete"},
+{r:"Chick-fil-A",cal:530,p:59,d:"Spicy Southwest Salad with EXTRA SPICY CHICKEN, NO DRESSING. Add ½ individual 0% Greek yogurt and Cholula hot sauce."},
+{r:"Chick-fil-A",cal:460,p:60,d:"Grilled Pimento Cheese Sandwich lettuce wrapped, EXTRA jalapeños, 8ct grilled nuggets, 2 sides pickles, 1 honey BBQ, 1 Texas Pete"},
+{r:"Chick-fil-A",cal:395,p:44,d:"12ct grilled nuggets with kale crunch salad as a side. 1 honey, 3 Texas Pete hot sauces, Diet Coke."},
+{r:"Chick-fil-A",cal:580,p:44,d:"Chicken Tortilla Soup w/ tortilla strips, add Texas Pete"},
+{r:"Chick-fil-A",cal:280,p:27,d:"Grilled Chicken Sandwich minus the bun, side of mac and cheese, Texas Pete"},
+{r:"Chili's",cal:590,p:35,d:"Kids Grilled Chicken Dippers with steamed broccoli (320cal), side white cheddar mac & cheese (270cal)"},
+{r:"Chipotle",cal:540,p:54,d:"Bowl: Steak x2, no rice, light black beans, fresh tomato salsa, fajita veggies, light cheese, EXTRA romaine. Side red salsa + sour cream crema."},
+{r:"Chipotle",cal:545,p:70,d:"Bowl: EXTRA chicken, no rice, no beans, EXTRA fajita veggies, light cheese. Side red salsa + sour cream crema."},
+{r:"Chipotle",cal:520,p:30,d:"3 Tacos: Steak, fajita veggies, fresh tomato salsa, romaine. NO rice/beans. Side red salsa + sour cream crema."},
+{r:"Chipotle",cal:440,p:33,d:"Bowl: Brisket, no beans/rice, fajita veggies, corn pico, red chili habanero salsa, sour cream, lettuce. Split with Quest chips like nachos!"},
+{r:"Chipotle",cal:460,p:47,d:"Bowl: Double steak, fajita veggies, light cheese, light romaine. Side red chili tomatillo + half sour cream for sauce."},
+{r:"Culver's",cal:500,p:24,d:"Kids 2pc Chicken Tender Meal, Kids Fry, Medium Diet Coke, Frank's Buffalo Sauce for dipping"},
+{r:"Dairy Queen",cal:200,p:4,d:"Kids Chocolate Dipped Cone — 200 cals!"},
+{r:"Del Taco",cal:560,p:28,d:"2 Shredded Beef Birria Street Tacos and Consomé Dip Combo with small fry, medium hot sauce, Diet Coke"},
+{r:"Dunkin'",cal:395,p:15,d:"\"Almond Joy\" Iced Coffee (135cal): Medium w/ almond milk, 3SF Coconut, 3SF Toasted Almond. Green Goddess Wrap (260cal)."},
+{r:"Freddy's",cal:535,p:48,d:"Double Steak Burger LETTUCE WRAPPED: 1 American cheese, extra jalapeños, pickles, onions. 1 Fry Sauce. Diet Coke."},
+{r:"Jimmy John's",cal:460,p:30,d:"Turkey Tom Unwich Combo: No mayo, extra turkey. ADD pickles, hot peppers, salt, oregano. Jalapeño chips."},
+{r:"Jersey Mike's",cal:440,p:42,d:"#13 Original Italian in a Bowl: Onion, tomato, red wine vinegar, oregano, hot pepper relish, extra meat. NO OLIVE OIL BLEND."},
+{r:"Jersey Mike's",cal:510,p:45,d:"#7 Turkey & Provolone Bowl: Extra turkey, NO olive oil blend. Onions, lettuce, tomatoes, red wine vinegar, oregano, pickles, banana peppers, jalapeño."},
+{r:"Jersey Mike's",cal:400,p:49,d:"#8 Club Sub in a Bowl: Extra meat, NO mayo, NO vinegar, NO olive oil blend. Full toppings + provolone, bacon, jalapeño."},
+{r:"McDonald's",cal:470,p:null,d:"McDouble NO BUN: No ketchup/mustard, extra lettuce, extra pickles. Small Fry. ½ Tangy BBQ sauce."},
+{r:"McDonald's",cal:385,p:26,d:"Breakfast Taco: McChicken Biscuit NO BISCUIT, add folded egg, American cheese, bacon. Bring a Mission Carb Balance tortilla!"},
+{r:"Mod Pizza",cal:420,p:25,d:"Mini 6\" pizza: Red sauce, mozzarella, plant-based Italian sausage, mushrooms, roasted garlic, red peppers, oregano, red onions, pesto drizzle."},
+{r:"Moe's",cal:479,p:51,d:"10\" Junior Burrito: Double steak, seasoned rice, grilled peppers & onions, corn pico, tomatoes, pico, fresh jalapeño. Side sour cream + habanero."},
+{r:"Olive Garden",cal:540,p:42,d:"Create Your Own: Sautéed shrimp, SUB BROCCOLI FOR PASTA, alfredo on side (use half). Comes with salad + breadsticks."},
+{r:"Panda Express",cal:535,p:39,d:"Bowl: Teriyaki Chicken, half white rice, half super greens. Chili sauce + soy sauce."},
+{r:"Panda Express",cal:460,p:30,d:"Bowl: Black Pepper Angus Steak + super greens (270cal). Chili sauce. 1 order Cream Cheese Rangoon (180cal)."},
+{r:"Panera",cal:520,p:34,d:"Whole Mediterranean Veggie Sandwich: No feta, no hummus, no mayo. ADD Black Forest Ham. Side Green Goddess Dressing."},
+{r:"Popeyes",cal:500,p:50,d:"5pc Blackened Tender Combo: Mac & cheese, no biscuit. Louisiana hot sauce + pickles. Coat tenders, dip in mac & cheese!"},
+{r:"Popeyes",cal:390,p:45,d:"5pc Blackened Tender Combo: Mashed potatoes w/ Cajun Gravy, no biscuit. DIP DIP!"},
+{r:"Popeyes",cal:530,p:51,d:"5pc Blackened Tender Combo: Red Beans & Rice, no biscuit. Louisiana Hot Sauce, Diet Coke."},
+{r:"Qdoba",cal:500,p:36,d:"Extra grilled steak, cilantro lime rice, no beans, street corn, pickled red onions, fajita veggies, romaine, cojita, fiery habanero salsa."},
+{r:"Raising Cane's",cal:500,p:31,d:"2 Tenders, 1 Texas Toast (split longways as wraps), coleslaw, Louisiana Hot Sauce. Build wraps!"},
+{r:"Raising Cane's",cal:530,p:57,d:"4pc Box Combo \"NAKED\" tenders, no fries, extra coleslaw (save for later). Split toast as sandwich bread."},
+{r:"Shake Shack",cal:456,p:38,d:"Double hamburger lettuce wrapped with tomatoes, onions, pickles. 1 side Shack Sauce."},
+{r:"Smoothie King",cal:350,p:30,d:"Lean1 Pineapple Mango 20oz: Add Blue Spirulina + 2 scoops Strawberry Gladiator Protein."},
+{r:"Sonic",cal:430,p:null,d:"Hickory BBQ Chicken Tender Wrap NO BBQ sauce: Lettuce, pickle, tomato, onion. Large Diet Limeade w/ SF blackberry, SF raspberry, fresh lime."},
+{r:"Subway",cal:460,p:27,d:"Black Forest Ham Wrap: MORE lettuce, spinach, MORE tomatoes, cucumbers, green peppers, red onions, pickles, olives, jalapeños, banana peppers, sweet onion teriyaki."},
+{r:"Subway",cal:510,p:42,d:"Oven Roasted Turkey & Ham Wrap: DOUBLE turkey, all the veggies, jalapeños, banana peppers, sweet onion teriyaki."},
+{r:"Taco Bell",cal:530,p:43,d:"Chicken Enchilada Burrito: Double Chicken, NO sour cream, NO cheese blend. Side cheese sauce (use ½), ALL fire sauce, Quest hot & spicy chips."},
+{r:"Taco Bell",cal:336,p:36,d:"5pc Crispy Chicken Nuggets (336cal/36g protein). Diet Baja Blast. Each dipping sauce adds 210cal — favorites: Jalapeño Honey Mustard, Fire Ranch."},
+{r:"Taco Bell",cal:510,p:45,d:"5pc Crispy Chicken Nuggets (no signature sauce) + Beef Supreme Soft Taco (no sour cream). Side cheese sauce + fire sauce for dipping. Add nuggets to taco!"},
+{r:"Wendy's",cal:510,p:null,d:"Small Chili + cheese + onion (290cal). Junior Fry (210cal). Chili Sauce. DIP DIP!"},
+{r:"Wendy's",cal:470,p:31,d:"Grilled Chicken Ranch Wrap: Add pickle, onion, and bacon."},
+{r:"Wendy's",cal:530,p:34,d:"Double Stack on LETTUCE: Tomatoes, onion, bacon. 4ct Spicy Chicken Nuggets. Add nuggets to burger or dip in Sweet & Sour/BBQ."},
+{r:"Wendy's",cal:340,p:24,d:"Breakfast: Egg bacon cheese croissant NO CROISSANT, no Swiss, ADD American, extra bacon, 1 extra egg. Cholula."},
+{r:"Wendy's",cal:510,p:45,d:"Parmesan Chicken Caesar Salad: EXTRA Chicken, ½ Caesar dressing packet."},
+{r:"Zaxby's",cal:530,p:40,d:"4 Finger Plate: Sub extra coleslaw for fries, no toast. Tongue Torch sauce, pickles. Dip tenders → sauce → coleslaw."},
+{r:"Zaxby's",cal:490,p:38,d:"Grilled Chicken Sandwich: Lettuce, tomatoes, pickles. 1 Tongue Torch Sauce."},
+];
+
+const FF_BRANDS={
+"Arby's":{color:"#d4302f",emoji:"🥩"},"Buc-ee's":{color:"#fbbf24",emoji:"⛽"},"Cava":{color:"#2d6a4f",emoji:"🥙"},
+"Chicken Salad Chick":{color:"#c2185b",emoji:"🐔"},"Chick-fil-A":{color:"#e51636",emoji:"🐄"},"Chili's":{color:"#00833e",emoji:"🌶️"},
+"Chipotle":{color:"#441500",emoji:"🌯"},"Culver's":{color:"#004b87",emoji:"🍔"},"Dairy Queen":{color:"#ee1c2e",emoji:"🍦"},
+"Del Taco":{color:"#e31837",emoji:"🌮"},"Dunkin'":{color:"#ff6600",emoji:"☕"},"Freddy's":{color:"#b71c1c",emoji:"🍔"},
+"Jimmy John's":{color:"#1a1a1a",emoji:"🥖"},"Jersey Mike's":{color:"#0054a4",emoji:"🥪"},"McDonald's":{color:"#ffc72c",emoji:"🍟"},
+"Mod Pizza":{color:"#c62828",emoji:"🍕"},"Moe's":{color:"#ffd600",emoji:"🌯"},"Olive Garden":{color:"#5c6b29",emoji:"🍝"},
+"Panda Express":{color:"#d32f2f",emoji:"🐼"},"Panera":{color:"#4a7c59",emoji:"🥖"},"Popeyes":{color:"#f26522",emoji:"🍗"},
+"Qdoba":{color:"#8b4513",emoji:"🌯"},"Raising Cane's":{color:"#fdd835",emoji:"🍗"},"Shake Shack":{color:"#1a1a1a",emoji:"🍔"},
+"Smoothie King":{color:"#e91e63",emoji:"🥤"},"Sonic":{color:"#0071ce",emoji:"🥤"},"Subway":{color:"#008c15",emoji:"🥖"},
+"Taco Bell":{color:"#702082",emoji:"🔔"},"Wendy's":{color:"#e2203d",emoji:"🍔"},"Zaxby's":{color:"#0033a0",emoji:"🍗"},
+};
+
+function FastFoodHacks({s,d}){
+  const [search,setSearch]=useState("");
+  const [brand,setBrand]=useState("All");
+  const [sort,setSort]=useState("cal"); // cal, protein, name
+  const [expanded,setExpanded]=useState(null);
+
+  const brands=["All",...[...new Set(FF_HACKS.map(h=>h.r))].sort()];
+
+  const filtered=useMemo(()=>{
+    let list=FF_HACKS;
+    if(brand!=="All")list=list.filter(h=>h.r===brand);
+    if(search)list=list.filter(h=>h.r.toLowerCase().includes(search.toLowerCase())||h.d.toLowerCase().includes(search.toLowerCase()));
+    if(sort==="cal")list=[...list].sort((a,b)=>a.cal-b.cal);
+    else if(sort==="protein")list=[...list].sort((a,b)=>(b.p||0)-(a.p||0));
+    else list=[...list].sort((a,b)=>a.r.localeCompare(b.r));
+    return list;
+  },[search,brand,sort]);
+
+  const addToNutrition=(hack)=>{
+    const n={id:uid(),date:today(),cal:hack.cal||0,protein:hack.p||0,carbs:0,fat:0,fiber:0,water:0,sleep:0,
+      meals:[{name:"Fast Food",items:[{name:`${hack.r} Hack`,cal:hack.cal||0,protein:hack.p||0,carbs:0,fat:0}]}]};
+    d({type:"ADD_N",n});
+  };
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",gap:12}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div>
+          <div style={{fontSize:18,fontWeight:800,color:V.text}}>Fast Food Hacks</div>
+          <div style={{fontSize:11,color:V.text3}}>{filtered.length} macro-friendly meals under 600 cal</div>
+        </div>
+      </div>
+
+      {/* Search */}
+      <div style={{position:"relative"}}>
+        <div style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)"}}>{Icons.search({size:14,color:V.text3})}</div>
+        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search restaurants or ingredients..."
+          aria-label="Search fast food hacks"
+          style={{width:"100%",padding:"10px 14px 10px 34px",background:"rgba(255,255,255,0.04)",border:`1px solid ${V.cardBorder}`,
+            borderRadius:10,color:V.text,fontSize:13,outline:"none",boxSizing:"border-box",fontFamily:V.font}}/>
+      </div>
+
+      {/* Sort */}
+      <div style={{display:"flex",gap:6}}>
+        {[{k:"cal",l:"Lowest Cal"},{k:"protein",l:"Most Protein"},{k:"name",l:"A→Z"}].map(s2=>(
+          <button key={s2.k} onClick={()=>setSort(s2.k)} style={{padding:"6px 12px",borderRadius:8,
+            border:`1.5px solid ${sort===s2.k?V.accent:V.cardBorder}`,
+            background:sort===s2.k?`${V.accent}10`:"rgba(255,255,255,0.02)",
+            cursor:"pointer",fontSize:10,fontWeight:600,color:sort===s2.k?V.accent:V.text3,fontFamily:V.font}}>{s2.l}</button>
+        ))}
+      </div>
+
+      {/* Brand filter — horizontal scroll */}
+      <div style={{display:"flex",gap:6,overflowX:"auto",paddingBottom:4,WebkitOverflowScrolling:"touch"}}>
+        {brands.map(b=>{
+          const info=FF_BRANDS[b];
+          return(
+            <button key={b} onClick={()=>setBrand(b)} style={{flexShrink:0,padding:"6px 12px",borderRadius:8,
+              border:`1.5px solid ${brand===b?(info?.color||V.accent):V.cardBorder}`,
+              background:brand===b?`${info?.color||V.accent}15`:"rgba(255,255,255,0.02)",
+              cursor:"pointer",fontSize:10,fontWeight:600,color:brand===b?(info?.color||V.accent):V.text3,
+              fontFamily:V.font,display:"flex",alignItems:"center",gap:4,whiteSpace:"nowrap"}}>
+              {info?.emoji&&<span style={{fontSize:12}}>{info.emoji}</span>}
+              {b}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Results */}
+      {filtered.map((hack,i)=>{
+        const info=FF_BRANDS[hack.r]||{color:V.accent,emoji:"🍽️"};
+        const isExpanded=expanded===i;
+        return(
+          <div key={i} onClick={()=>setExpanded(isExpanded?null:i)} style={{
+            background:"rgba(255,255,255,0.02)",border:`1px solid ${V.cardBorder}`,borderRadius:14,
+            overflow:"hidden",cursor:"pointer",transition:"all .15s"}}>
+            {/* Header */}
+            <div style={{padding:"12px 14px",display:"flex",alignItems:"center",gap:10}}>
+              <div style={{width:40,height:40,borderRadius:10,background:`${info.color}15`,
+                display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0}}>
+                {info.emoji}
+              </div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:13,fontWeight:700,color:V.text,display:"flex",alignItems:"center",gap:6}}>
+                  {hack.r}
+                </div>
+                <div style={{fontSize:10,color:V.text3,marginTop:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+                  {hack.d.split("\n")[0]}
+                </div>
+              </div>
+              <div style={{textAlign:"right",flexShrink:0}}>
+                <div style={{fontSize:16,fontWeight:800,color:V.warn,fontFamily:V.mono}}>{hack.cal}</div>
+                <div style={{fontSize:8,color:V.text3,fontWeight:600}}>CAL</div>
+              </div>
+              {hack.p&&(
+                <div style={{textAlign:"right",flexShrink:0,marginLeft:4}}>
+                  <div style={{fontSize:14,fontWeight:800,color:V.accent,fontFamily:V.mono}}>{hack.p}g</div>
+                  <div style={{fontSize:8,color:V.text3,fontWeight:600}}>PROT</div>
+                </div>
+              )}
+            </div>
+
+            {/* Expanded detail */}
+            {isExpanded&&(
+              <div style={{padding:"0 14px 14px",borderTop:`1px solid ${V.cardBorder}`}}>
+                <div style={{padding:"10px 0",fontSize:12,color:V.text2,lineHeight:1.6,whiteSpace:"pre-line"}}>{hack.d}</div>
+                <div style={{display:"flex",gap:8,marginTop:8}}>
+                  <button onClick={e=>{e.stopPropagation();addToNutrition(hack);}} style={{flex:1,padding:"10px",borderRadius:10,
+                    background:`${V.accent}12`,border:`1px solid ${V.accent}25`,cursor:"pointer",
+                    fontSize:11,fontWeight:700,color:V.accent,fontFamily:V.font,display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
+                    {Icons.plus({size:14,color:V.accent})} Log This Meal
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      {filtered.length===0&&(
+        <div style={{textAlign:"center",padding:30,color:V.text3}}>
+          <div style={{fontSize:28,marginBottom:8}}>🔍</div>
+          <div style={{fontSize:13}}>No hacks found for "{search||brand}"</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Log Hub ───
 function LogHub({s,d}){
   return(
@@ -5714,6 +5918,7 @@ function TrackHub({s,d}){
 
       <Section title="Planning" items={[
         {id:"track_calendar",icon:Icons.calendar,label:"Schedule",desc:"Weekly plan & calendar",color:"#34d399"},
+        {id:"track_fastfood",icon:Icons.fork,label:"Fast Food Hacks",desc:"81 macro-friendly meals",color:"#f97316"},
       ]}/>
     </div>
   );
@@ -6029,6 +6234,7 @@ function App(){
         {s.tab==="track_dataguard"&&<div><SubBack to="track" label="Track"/><DataGuardTab s={s} d={d}/></div>}
         {s.tab==="track_summary"&&<div><SubBack to="track" label="Track"/><WeeklySummary s={s}/></div>}
         {s.tab==="track_onerm"&&<div><SubBack to="track" label="Track"/><OneRMCalc units={s.units}/></div>}
+        {s.tab==="track_fastfood"&&<div><SubBack to="track" label="Track"/><FastFoodHacks s={s} d={d}/></div>}
 
         {/* Global footer on every page */}
         <Footer/>
