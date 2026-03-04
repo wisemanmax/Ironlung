@@ -99,7 +99,7 @@ A complete workout, nutrition, and body metrics tracking app built as a Progress
 
 ## Install on iPhone
 
-1. Open `https://www.Ironlog.space/` in **Safari**
+1. Open `https://wisemanmax.github.io/ironlog/` in **Safari**
 2. Tap the **Share** button (square with arrow)
 3. Scroll down and tap **"Add to Home Screen"**
 4. Name it **IRONLOG** and tap **Add**

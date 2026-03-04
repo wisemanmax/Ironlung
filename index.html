@@ -436,7 +436,9 @@ const defaultSchedule = {
 };
 const init={tab:"home",workouts:[],nutrition:[],body:[],exercises:defaultExercises,
   goals:{cal:2400,protein:180,carbs:250,fat:70,goalWeight:175},schedule:defaultSchedule,
-  range:30,loaded:false,modal:null,units:"lbs",onboarded:false,photos:[]};
+  range:30,loaded:false,modal:null,units:"lbs",onboarded:false,photos:[],
+  profile:{firstName:"",lastName:"",nickname:"",email:"",dob:"",sex:"",state:"",
+    height:"",fitnessLevel:"",activityLevel:"",weeklyAvailability:""}};
 
 function reducer(s,a){
   switch(a.type){
@@ -461,9 +463,10 @@ function reducer(s,a){
     case "SET_SCHEDULE": return{...s,schedule:a.schedule};
     case "UNITS": return{...s,units:a.u};
     case "ONBOARDED": return{...s,onboarded:true};
+    case "SET_PROFILE": return{...s,profile:{...(s.profile||{}),...a.profile}};
     case "ADD_PHOTO": return{...s,photos:[a.photo,...s.photos]};
     case "DEL_PHOTO": return{...s,photos:s.photos.filter(p=>p.id!==a.id)};
-    case "CLEAR_ALL": return{...init,exercises:defaultExercises,loaded:true,onboarded:true,units:s.units};
+    case "CLEAR_ALL": return{...init,exercises:defaultExercises,loaded:true,onboarded:true,units:s.units,profile:s.profile};
     case "IMPORT": return{...s,...a.data,loaded:true};
     default: return s;
   }
@@ -953,6 +956,7 @@ function HomeTab({s,d}){
   const u=wUnit(s.units);
   const hr=new Date().getHours();
   const greeting=hr<12?"Good morning":hr<17?"Good afternoon":"Good evening";
+  const displayName=s.profile?.nickname||s.profile?.firstName||"";
   const latestBW=s.body.find(b=>b.weight)?.weight;
 
   // Weekly dots
@@ -983,7 +987,7 @@ function HomeTab({s,d}){
       {/* Hero: Greeting + Today + Streak */}
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
         <div>
-          <div style={{fontSize:12,color:V.text3}}>{greeting}</div>
+          <div style={{fontSize:12,color:V.text3}}>{greeting}{displayName?`, ${displayName}`:""}</div>
           <div style={{fontSize:20,fontWeight:800,color:V.text,lineHeight:1.2}}>
             {todayType==="Rest"?"Recovery Day":`${todayType} Day`}
           </div>
@@ -2350,6 +2354,11 @@ function SettingsTab({s,d}){
       </Row>
 
       {/* Backup — expandable */}
+      <Row id="profile" icon={Icons.target({size:16,color:"#e879f9"})} label="Edit Profile"
+        desc={s.profile?.firstName?`${s.profile.firstName} ${s.profile.lastName}`:"Not set"}>
+        <ProfileEditor s={s} d={d}/>
+      </Row>
+
       <Row id="backup" icon={Icons.refresh({size:16,color:V.accent2})} label="Backup & Restore"
         desc="Export or import your data">
         <DataManager s={s} d={d}/>
@@ -2388,6 +2397,11 @@ function Onboarding({d}){
   const [units,setUnits]=useState("lbs");
   const [goals,setGoals]=useState({cal:"2400",protein:"180",carbs:"250",fat:"70",goalWeight:"175"});
   const [bw,setBw]=useState("");
+  const [sending,setSending]=useState(false);
+  const [profile,setProfile]=useState({
+    firstName:"",lastName:"",nickname:"",email:"",dob:"",sex:"",state:"",
+    height:"",fitnessLevel:"",activityLevel:"",weeklyAvailability:""
+  });
 
   const splits={
     "PPL":{desc:"Push / Pull / Legs",days:{1:"Push",2:"Pull",3:"Legs",4:"Push",5:"Pull",6:"Legs",0:"Rest"}},
@@ -2397,14 +2411,58 @@ function Onboarding({d}){
     "Custom":{desc:"Set your own schedule later",days:{0:"Rest",1:"Rest",2:"Rest",3:"Rest",4:"Rest",5:"Rest",6:"Rest"}},
   };
 
-  const finish=()=>{
+  const US_STATES=["Alabama","Alaska","Arizona","Arkansas","California","Colorado","Connecticut","Delaware",
+    "Florida","Georgia","Hawaii","Idaho","Illinois","Indiana","Iowa","Kansas","Kentucky","Louisiana","Maine",
+    "Maryland","Massachusetts","Michigan","Minnesota","Mississippi","Missouri","Montana","Nebraska","Nevada",
+    "New Hampshire","New Jersey","New Mexico","New York","North Carolina","North Dakota","Ohio","Oklahoma",
+    "Oregon","Pennsylvania","Rhode Island","South Carolina","South Dakota","Tennessee","Texas","Utah","Vermont",
+    "Virginia","Washington","West Virginia","Wisconsin","Wyoming","Other"];
+
+  const sendToBackend=async(payload)=>{
+    try{
+      const res=await fetch("https://ironlog.space/api/users/create",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify(payload),
+      });
+      if(!res.ok)throw new Error("Server error");
+      return true;
+    }catch(e){
+      // Silently fail — data is stored locally regardless
+      console.log("Backend sync deferred — data saved locally",e.message);
+      return false;
+    }
+  };
+
+  const finish=async()=>{
+    setSending(true);
+
+    // Build full payload
+    const payload={
+      ...profile,
+      currentWeight:parseFloat(bw)||null,
+      targetWeight:parseInt(goals.goalWeight)||null,
+      units,split,
+      goals:{cal:parseInt(goals.cal),protein:parseInt(goals.protein),carbs:parseInt(goals.carbs),fat:parseInt(goals.fat)},
+      createdAt:new Date().toISOString(),
+      deviceId:uid(),
+    };
+
+    // Send to backend (non-blocking — app works regardless)
+    await sendToBackend(payload);
+
+    // Apply to local state
     d({type:"UNITS",u:units});
     d({type:"GOALS",g:{cal:parseInt(goals.cal)||2400,protein:parseInt(goals.protein)||180,
       carbs:parseInt(goals.carbs)||250,fat:parseInt(goals.fat)||70,goalWeight:parseInt(goals.goalWeight)||175}});
     d({type:"SET_SCHEDULE",schedule:{weekly:splits[split].days,overrides:{}}});
+    d({type:"SET_PROFILE",profile});
     if(bw){d({type:"ADD_B",b:{id:uid(),date:today(),weight:parseFloat(bw)||0,bf:"",chest:"",waist:"",arms:"",thighs:""}});}
     d({type:"ONBOARDED"});
+    setSending(false);
   };
+
+  const profileValid=profile.firstName.trim()&&profile.lastName.trim()&&profile.email.trim()&&profile.dob&&profile.sex&&profile.state;
 
   const steps=[
     // Step 0: Welcome
@@ -2473,14 +2531,129 @@ function Onboarding({d}){
           <Field label="Current Weight" type="number" value={bw} onChange={setBw} unit={units}/>
           <Field label="Goal Weight" type="number" value={goals.goalWeight} onChange={v=>setGoals(g=>({...g,goalWeight:v}))} unit={units}/>
         </div>
-        <Btn full onClick={finish} s={{marginTop:16}}>{Icons.check({size:16,color:V.bg})} Let's Go</Btn>
+        <Btn full onClick={()=>setStep(4)} s={{marginTop:16}}>Next</Btn>
+      </div>
+    ),
+    // Step 4: Profile Setup
+    ()=>(
+      <div>
+        <div style={{fontSize:18,fontWeight:700,marginBottom:4}}>Profile Setup</div>
+        <div style={{fontSize:13,color:V.text3,marginBottom:16}}>Tell us about yourself to personalize your experience</div>
+
+        {/* Required fields */}
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+          <Field label="First Name *" value={profile.firstName} onChange={v=>setProfile(p=>({...p,firstName:v}))} placeholder="John"/>
+          <Field label="Last Name *" value={profile.lastName} onChange={v=>setProfile(p=>({...p,lastName:v}))} placeholder="Smith"/>
+        </div>
+        <Field label="Email *" type="email" value={profile.email} onChange={v=>setProfile(p=>({...p,email:v}))} placeholder="you@email.com"/>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+          <Field label="Date of Birth *" type="date" value={profile.dob} onChange={v=>setProfile(p=>({...p,dob:v}))}/>
+          <div>
+            <div style={{fontSize:11,color:V.text3,textTransform:"uppercase",letterSpacing:".08em",marginBottom:6,fontWeight:600}}>Sex *</div>
+            <div style={{display:"flex",gap:6}}>
+              {["Male","Female"].map(sx=>(
+                <button key={sx} onClick={()=>setProfile(p=>({...p,sex:sx}))} style={{
+                  flex:1,padding:"10px 0",borderRadius:10,border:`1.5px solid ${profile.sex===sx?V.accent:V.cardBorder}`,
+                  background:profile.sex===sx?`${V.accent}10`:"rgba(255,255,255,0.02)",
+                  cursor:"pointer",WebkitTapHighlightColor:"transparent",
+                  fontSize:13,fontWeight:600,color:profile.sex===sx?V.accent:V.text,fontFamily:V.font,textAlign:"center"
+                }}>{sx}</button>
+              ))}
+            </div>
+          </div>
+        </div>
+        <div>
+          <div style={{fontSize:11,color:V.text3,textTransform:"uppercase",letterSpacing:".08em",marginBottom:6,fontWeight:600}}>State / Region *</div>
+          <select value={profile.state} onChange={e=>setProfile(p=>({...p,state:e.target.value}))}
+            style={{width:"100%",padding:"12px 14px",background:"rgba(255,255,255,0.04)",border:`1px solid ${V.cardBorder}`,
+              borderRadius:12,color:profile.state?V.text:V.text3,fontSize:14,outline:"none",minHeight:44,
+              WebkitAppearance:"none",fontFamily:V.font}}>
+            <option value="" style={{background:"#14141f"}}>Select state...</option>
+            {US_STATES.map(st=><option key={st} value={st} style={{background:"#14141f"}}>{st}</option>)}
+          </select>
+        </div>
+
+        {/* Optional fields */}
+        <div style={{marginTop:16,marginBottom:8}}>
+          <div style={{fontSize:13,fontWeight:700,color:V.text,marginBottom:2}}>Optional</div>
+          <div style={{fontSize:11,color:V.text3}}>These help us personalize recommendations</div>
+        </div>
+        <Field label="Nickname" value={profile.nickname} onChange={v=>setProfile(p=>({...p,nickname:v}))} placeholder="What should we call you?"/>
+        <Field label="Height" value={profile.height} onChange={v=>setProfile(p=>({...p,height:v}))} placeholder="e.g. 5'10 or 178cm"/>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+          <div>
+            <div style={{fontSize:11,color:V.text3,textTransform:"uppercase",letterSpacing:".08em",marginBottom:6,fontWeight:600}}>Experience</div>
+            <select value={profile.fitnessLevel} onChange={e=>setProfile(p=>({...p,fitnessLevel:e.target.value}))}
+              style={{width:"100%",padding:"12px 14px",background:"rgba(255,255,255,0.04)",border:`1px solid ${V.cardBorder}`,
+                borderRadius:12,color:profile.fitnessLevel?V.text:V.text3,fontSize:14,outline:"none",minHeight:44,
+                WebkitAppearance:"none",fontFamily:V.font}}>
+              <option value="" style={{background:"#14141f"}}>Select...</option>
+              {["Beginner","Intermediate","Advanced","Elite"].map(lv=>(
+                <option key={lv} value={lv} style={{background:"#14141f"}}>{lv}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <div style={{fontSize:11,color:V.text3,textTransform:"uppercase",letterSpacing:".08em",marginBottom:6,fontWeight:600}}>Activity</div>
+            <select value={profile.activityLevel} onChange={e=>setProfile(p=>({...p,activityLevel:e.target.value}))}
+              style={{width:"100%",padding:"12px 14px",background:"rgba(255,255,255,0.04)",border:`1px solid ${V.cardBorder}`,
+                borderRadius:12,color:profile.activityLevel?V.text:V.text3,fontSize:14,outline:"none",minHeight:44,
+                WebkitAppearance:"none",fontFamily:V.font}}>
+              <option value="" style={{background:"#14141f"}}>Select...</option>
+              {["Sedentary","Lightly Active","Moderate","Very Active","Extremely Active"].map(lv=>(
+                <option key={lv} value={lv} style={{background:"#14141f"}}>{lv}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <div>
+          <div style={{fontSize:11,color:V.text3,textTransform:"uppercase",letterSpacing:".08em",marginBottom:6,fontWeight:600}}>Weekly Availability</div>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+            {["2 days","3 days","4 days","5 days","6 days","7 days"].map(opt=>(
+              <button key={opt} onClick={()=>setProfile(p=>({...p,weeklyAvailability:opt}))} style={{
+                padding:"8px 14px",borderRadius:10,border:`1.5px solid ${profile.weeklyAvailability===opt?V.accent:V.cardBorder}`,
+                background:profile.weeklyAvailability===opt?`${V.accent}10`:"rgba(255,255,255,0.02)",
+                cursor:"pointer",WebkitTapHighlightColor:"transparent",
+                fontSize:12,fontWeight:600,color:profile.weeklyAvailability===opt?V.accent:V.text3,fontFamily:V.font
+              }}>{opt}</button>
+            ))}
+          </div>
+        </div>
+
+        {/* Privacy note */}
+        <div style={{marginTop:14,padding:"10px 12px",background:"rgba(255,255,255,0.02)",borderRadius:10,
+          border:`1px solid ${V.cardBorder}`}}>
+          <div style={{fontSize:10,color:V.text3,lineHeight:1.5}}>
+            Your data is stored securely and used only to personalize your experience and improve IRONLOG. We never sell your information.
+          </div>
+        </div>
+
+        <Btn full onClick={finish} disabled={!profileValid||sending} s={{marginTop:16}}>
+          {sending?(
+            <span style={{display:"flex",alignItems:"center",gap:8,justifyContent:"center"}}>
+              <div style={{width:16,height:16,borderRadius:8,border:"2px solid rgba(255,255,255,0.2)",
+                borderTopColor:V.bg,animation:"spin 0.8s linear infinite"}}/>
+              Setting up...
+            </span>
+          ):(
+            <span>{Icons.check({size:16,color:V.bg})} Complete Setup</span>
+          )}
+        </Btn>
+
+        {!profileValid&&(
+          <div style={{fontSize:11,color:V.text3,textAlign:"center",marginTop:8}}>
+            Please fill in all required fields (*)
+          </div>
+        )}
       </div>
     ),
   ];
 
   return(
-    <div style={{minHeight:"100vh",maxWidth:430,margin:"0 auto",background:V.bg,color:V.text,fontFamily:V.font,
-      display:"flex",flexDirection:"column",justifyContent:"center",padding:"0 24px"}}>
+    <div style={{height:"100%",maxWidth:430,margin:"0 auto",background:V.bg,color:V.text,fontFamily:V.font,
+      display:"flex",flexDirection:"column",padding:"0 24px",overflowY:"auto",WebkitOverflowScrolling:"touch"}}>
+      <div style={{flex:1,display:"flex",flexDirection:"column",justifyContent:step<=3?"center":"flex-start",
+        paddingTop:step>3?20:0,paddingBottom:40}}>
       {/* Back button + Progress dots */}
       {step>0&&(
         <button onClick={()=>setStep(s=>s-1)} style={{background:"none",border:"none",display:"flex",alignItems:"center",
@@ -2496,6 +2669,7 @@ function Onboarding({d}){
         ))}
       </div>
       {steps[step]()}
+      </div>
     </div>
   );
 }
@@ -2580,6 +2754,64 @@ function ProgressPhotos({s,d}){
 }
 
 // ─── Export & Import ───
+// ─── Profile Editor (Settings) ───
+function ProfileEditor({s,d}){
+  const p=s.profile||{};
+  const [form,setForm]=useState({...p});
+  const [saved,setSaved]=useState(false);
+  const [syncing,setSyncing]=useState(false);
+
+  const saveProfile=async()=>{
+    d({type:"SET_PROFILE",profile:form});
+    setSaved(true);
+
+    // Sync to backend
+    setSyncing(true);
+    try{
+      await fetch("https://ironlog.space/api/users/update",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({...form,updatedAt:new Date().toISOString()}),
+      });
+    }catch(e){}
+    setSyncing(false);
+    setTimeout(()=>setSaved(false),2000);
+  };
+
+  const upd=(k,v)=>setForm(f=>({...f,[k]:v}));
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",gap:8}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+        <Field label="First Name" value={form.firstName||""} onChange={v=>upd("firstName",v)}/>
+        <Field label="Last Name" value={form.lastName||""} onChange={v=>upd("lastName",v)}/>
+      </div>
+      <Field label="Nickname" value={form.nickname||""} onChange={v=>upd("nickname",v)} placeholder="Display name"/>
+      <Field label="Email" type="email" value={form.email||""} onChange={v=>upd("email",v)}/>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+        <Field label="Date of Birth" type="date" value={form.dob||""} onChange={v=>upd("dob",v)}/>
+        <div>
+          <div style={{fontSize:11,color:V.text3,textTransform:"uppercase",letterSpacing:".08em",marginBottom:6,fontWeight:600}}>Sex</div>
+          <div style={{display:"flex",gap:6}}>
+            {["Male","Female"].map(sx=>(
+              <button key={sx} onClick={()=>upd("sex",sx)} style={{
+                flex:1,padding:"8px 0",borderRadius:8,border:`1.5px solid ${form.sex===sx?V.accent:V.cardBorder}`,
+                background:form.sex===sx?`${V.accent}10`:"rgba(255,255,255,0.02)",
+                cursor:"pointer",WebkitTapHighlightColor:"transparent",
+                fontSize:12,fontWeight:600,color:form.sex===sx?V.accent:V.text,fontFamily:V.font,textAlign:"center"
+              }}>{sx}</button>
+            ))}
+          </div>
+        </div>
+      </div>
+      <Field label="Height" value={form.height||""} onChange={v=>upd("height",v)} placeholder="5'10"/>
+      <Btn full onClick={saveProfile} s={{marginTop:4}}>
+        {syncing?"Saving...":(saved?`${Icons.check({size:14,color:V.bg})} Saved!`:`${Icons.check({size:14,color:V.bg})} Save Profile`)}
+      </Btn>
+    </div>
+  );
+}
+
 function DataManager({s,d}){
   const fileRef=useRef(null);
   const [msg,setMsg]=useState(null);
@@ -2589,7 +2821,7 @@ function DataManager({s,d}){
     const data={
       _ironlog:{version:CURRENT_VERSION,exported:new Date().toISOString(),platform:"IRONLOG v3"},
       workouts:s.workouts,nutrition:s.nutrition,body:s.body,exercises:s.exercises,
-      goals:s.goals,schedule:s.schedule,units:s.units,photos:s.photos||[]
+      goals:s.goals,schedule:s.schedule,units:s.units,photos:s.photos||[],profile:s.profile||{}
     };
     const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
     const url=URL.createObjectURL(blob);
@@ -3234,10 +3466,11 @@ function App(){
     (async()=>{
       try{
         const data={};
-        ["ft-w","ft-n","ft-b","ft-ex","ft-g","ft-sched","ft-units","ft-onb","ft-photos"].forEach(k=>{const v=LS.get(k);if(v!==null)data[k]=v;});
+        ["ft-w","ft-n","ft-b","ft-ex","ft-g","ft-sched","ft-units","ft-onb","ft-photos","ft-profile"].forEach(k=>{const v=LS.get(k);if(v!==null)data[k]=v;});
         d({type:"INIT",p:{workouts:data["ft-w"]||[],nutrition:data["ft-n"]||[],body:data["ft-b"]||[],
           exercises:data["ft-ex"]||defaultExercises,goals:data["ft-g"]||init.goals,schedule:data["ft-sched"]||defaultSchedule,
-          units:data["ft-units"]||"lbs",onboarded:data["ft-onb"]||false,photos:data["ft-photos"]||[]}});
+          units:data["ft-units"]||"lbs",onboarded:data["ft-onb"]||false,photos:data["ft-photos"]||[],
+          profile:data["ft-profile"]||init.profile}});
       }catch(e){
         d({type:"INIT",p:{exercises:defaultExercises,goals:init.goals,schedule:defaultSchedule}});
       }
@@ -3256,8 +3489,9 @@ function App(){
       LS.set("ft-units",s.units);
       LS.set("ft-onb",s.onboarded);
       LS.set("ft-photos",s.photos);
+      LS.set("ft-profile",s.profile);
     }catch(e){}})();
-  },[s.workouts,s.nutrition,s.body,s.exercises,s.goals,s.schedule,s.units,s.onboarded,s.photos,s.loaded]);
+  },[s.workouts,s.nutrition,s.body,s.exercises,s.goals,s.schedule,s.units,s.onboarded,s.photos,s.profile,s.loaded]);
 
   // Show onboarding if first launch
   if(s.loaded&&!s.onboarded) return <Onboarding d={d}/>;
