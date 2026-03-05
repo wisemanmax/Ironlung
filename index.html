@@ -4234,6 +4234,58 @@ function DataManager({s,d}){
         <Btn v="secondary" full onClick={()=>fileRef.current?.click()} s={{marginTop:6}}>{Icons.upload({size:14,color:V.text2})} Import JSON</Btn>
         <div style={{fontSize:10,color:V.text3,marginTop:4}}>Import merges data — your existing entries won't be duplicated or lost.</div>
       </div>
+
+      {/* #4 Cloud vs Local Parity Checker */}
+      <div style={{borderTop:`1px solid ${V.cardBorder}`,paddingTop:10,marginTop:4}}>
+        <div style={{fontSize:11,fontWeight:600,color:V.text3,marginBottom:8}}>Data Health Check</div>
+        <Btn v="secondary" full onClick={async()=>{
+          const email=s.profile?.email;
+          if(!email){setMsg({type:"error",text:"No email — complete your profile first."});setTimeout(()=>setMsg(null),4000);return;}
+          setMsg({type:"info",text:"Checking cloud parity..."});
+          try{
+            const result=await CloudSync.pull(email,LS.get("ft-device-id"));
+            if(!result||!result.success){setMsg({type:"error",text:"Could not reach cloud. Try again later."});setTimeout(()=>setMsg(null),4000);return;}
+            const cloud=result.data;
+            const report=[];
+            // Compare counts
+            const checks=[
+              {name:"Workouts",local:s.workouts.length,cloud:(cloud.workouts||[]).length},
+              {name:"Nutrition",local:s.nutrition.length,cloud:(cloud.nutrition||[]).length},
+              {name:"Body",local:s.body.length,cloud:(cloud.body||[]).length},
+              {name:"Photos",local:(s.photos||[]).length,cloud:(cloud.photos||[]).length},
+              {name:"Check-ins",local:(s.checkins||[]).length,cloud:(cloud.checkins||[]).length},
+              {name:"Goals",local:(s.milestones||[]).length,cloud:(cloud.milestones||[]).length},
+            ];
+            let allMatch=true;
+            checks.forEach(c=>{
+              if(c.local!==c.cloud){allMatch=false;report.push(`${c.name}: ${c.local} local / ${c.cloud} cloud (${c.local>c.cloud?c.local-c.cloud+" not synced":"cloud has "+( c.cloud-c.local)+" extra"})`);}
+            });
+            // Check for local items missing from cloud by ID
+            const cloudWIds=new Set((cloud.workouts||[]).map(w=>w.id));
+            const unsyncedW=s.workouts.filter(w=>!cloudWIds.has(w.id)).length;
+            if(unsyncedW>0){allMatch=false;report.push(`${unsyncedW} workout(s) not yet in cloud`);}
+            const cloudNIds=new Set((cloud.nutrition||[]).map(n=>n.id));
+            const unsyncedN=s.nutrition.filter(n=>!cloudNIds.has(n.id)).length;
+            if(unsyncedN>0){allMatch=false;report.push(`${unsyncedN} nutrition log(s) not yet in cloud`);}
+
+            if(allMatch){
+              setMsg({type:"success",text:`✅ All data in sync — ${s.workouts.length} workouts, ${s.nutrition.length} nutrition, ${s.body.length} body across local and cloud`});
+            }else{
+              setMsg({type:"warn",text:`⚠️ Differences found:\n${report.join("\n")}`});
+            }
+            setTimeout(()=>setMsg(null),10000);
+          }catch(e){
+            setMsg({type:"error",text:"Health check failed: "+e.message});
+            setTimeout(()=>setMsg(null),4000);
+          }
+        }}>{Icons.activity({size:14,color:V.text2})} Run Health Check</Btn>
+        <div style={{fontSize:10,color:V.text3,marginTop:4}}>Compare local data against cloud to find unsynced entries or mismatches.</div>
+        {msg&&msg.text?.includes("Differences")&&(
+          <Btn v="secondary" full onClick={()=>{CloudSync.push(s);setMsg({type:"info",text:"Pushing all local data to cloud..."});setTimeout(()=>setMsg(null),3000);}} s={{marginTop:6}}>
+            {Icons.refresh({size:14,color:V.text2})} Force Sync Now
+          </Btn>
+        )}
+      </div>
     </div>
   );
 }
