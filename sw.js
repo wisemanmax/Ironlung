@@ -1,6 +1,6 @@
 // ═══ IRONLOG Service Worker v5.0 ═══
 // Phase 5: Offline fallback, background sync, push hardening, cache tuning
-var SW_VERSION = 'ironlog-v6.0';
+var SW_VERSION = 'ironlog-v7.0';
 var CACHE_NAME = SW_VERSION;
 var OFFLINE_PAGE = './offline.html';
 var APP_FILES = ['./', './index.html', './icon.svg', './manifest.json', OFFLINE_PAGE];
