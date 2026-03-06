@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#08080d">
+<title>IRONLOG — Offline</title>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@600;800&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%;background:#08080d;color:#e8e8ec;font-family:'Outfit',sans-serif;display:flex;align-items:center;justify-content:center;text-align:center}
+.wrap{padding:40px 20px;max-width:320px}
+.icon{font-size:48px;margin-bottom:16px}
+h1{font-size:20px;font-weight:800;margin-bottom:8px}
+p{font-size:13px;color:#8b8b9e;line-height:1.6;margin-bottom:20px}
+button{padding:12px 28px;border-radius:12px;border:none;background:#00f5a0;color:#08080d;font-size:14px;font-weight:700;font-family:'Outfit',sans-serif;cursor:pointer}
+.dot{width:8px;height:8px;border-radius:4px;background:#ff6b6b;display:inline-block;margin-right:6px;animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.3}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="icon">📡</div>
+  <h1>You're Offline</h1>
+  <p><span class="dot"></span>No internet connection detected. Your data is saved locally and will sync when you reconnect.</p>
+  <button onclick="location.reload()">Try Again</button>
+</div>
+</body>
+</html>
