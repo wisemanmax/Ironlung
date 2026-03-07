@@ -438,7 +438,7 @@ const ReconcileAPI = {
   },
 };
 
-const APP_VERSION="6.0";
+const APP_VERSION="8.0";
 const SW_VERSION="ironlog-v6.0"; // Keep in sync with sw.js
 
 // ─── Social API Client ───
@@ -1186,6 +1186,7 @@ function reducer(s,a){
     case "SET_SYNC_PREFS": return{...s,syncPrefs:{...(s.syncPrefs||{}),...a.prefs}};
     case "SET_A11Y": return{...s,a11y:{...(s.a11y||{}),...a.a11y}};
     case "ADD_PHOTO": return{...s,photos:[a.photo,...s.photos]};
+    case "UPDATE_PHOTO": return{...s,photos:s.photos.map(p=>p.id===a.id?{...p,data:a.url||p.data,synced:true}:p)};
     case "DEL_PHOTO": return{...s,photos:s.photos.filter(p=>p.id!==a.id)};
     // #E4: Preserve a11y on CLEAR_ALL — large text/high contrast/reduce motion were silently lost on data reset
     case "CLEAR_ALL": return{...init,exercises:defaultExercises,loaded:true,onboarded:true,units:s.units,profile:s.profile,a11y:s.a11y};
@@ -5925,17 +5926,34 @@ function ProgressPhotos({s,d}){
     const isVideo=file.type.startsWith("video/");
 
     if(isVideo){
-      // Store video as blob URL (local only — too large for base64 sync)
+      // Upload video to R2 via API (supports mp4/mov up to 50MB)
+      if(file.size>50*1024*1024){SuccessToastCtrl.show("Video too large (max 50MB)");setCompressing(false);e.target.value="";return;}
       const reader=new FileReader();
-      reader.onload=(ev)=>{
-        const entry={id:uid(),date:today(),data:ev.target.result,note:"",
+      reader.onload=async(ev)=>{
+        const base64=ev.target.result;
+        const blobUrl=URL.createObjectURL(file);
+        const entry={id:uid(),date:today(),data:blobUrl,note:"",
           size:file.size,original:file.name,private:!!isPrivate,type:"video",mime:file.type};
         d({type:"ADD_PHOTO",photo:entry});
-        SuccessToastCtrl.show(isPrivate?"Video saved to vault (local only)":"Video saved (local only — won't sync to cloud)");
+        if(s.profile?.email){
+          try{
+            const res=await fetch(`${SYNC_URL}/api/photos/upload`,{
+              method:"POST",headers:AuthToken.getHeaders(s.profile.email),
+              body:JSON.stringify({email:s.profile.email,photoId:entry.id,date:entry.date,
+                data:base64,private:!!isPrivate,type:"video"})
+            });
+            const json=await res.json();
+            if(json.url){d({type:"UPDATE_PHOTO",id:entry.id,url:json.url});}
+            SuccessToastCtrl.show(isPrivate?"Video saved to vault":"Video saved & synced ✓");
+          }catch(e2){
+            console.warn("Video upload failed:",e2);
+            SuccessToastCtrl.show("Video saved locally");
+          }
+        }else{
+          SuccessToastCtrl.show("Video saved locally");
+        }
         setCompressing(false);
       };
-      // Only store videos under 50MB
-      if(file.size>50*1024*1024){SuccessToastCtrl.show("Video too large (max 50MB)");setCompressing(false);e.target.value="";return;}
       reader.readAsDataURL(file);
     }else{
       const compressed=await compressImage(file,800,0.7);
