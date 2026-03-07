@@ -5237,8 +5237,14 @@ function Onboarding({d}){
     LS.set("ft-device-id",payload.deviceId);
     // Create server-issued session token
     await SessionManager.create(profile.email,accountPin,payload.deviceId);
-    d({type:"ONBOARDED"});
+    // Send email verification code then show verify screen
+    try{
+      await fetch(`${SYNC_URL}/api/auth/session`,{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({action:"send_verify_code",email:profile.email})});
+    }catch(e){}
+    setVerifyStep("pending");
     setSending(false);
+    // Note: ONBOARDED is dispatched after email verified (or skipped via skip)
   };
 
   // ─── Onboarding Validation ───
@@ -5277,7 +5283,108 @@ function Onboarding({d}){
   const [signInPin,setSignInPin]=useState("");
   const [signInLoading,setSignInLoading]=useState(false);
   const [signInError,setSignInError]=useState("");
-  const [signInStep,setSignInStep]=useState("email"); // email | pin
+  const [signInStep,setSignInStep]=useState("email"); // email | pin | forgot | forgot_code | forgot_newpin
+
+  // ─── Forgot PIN state ───
+  const [forgotEmail,setForgotEmail]=useState("");
+  const [forgotCode,setForgotCode]=useState("");
+  const [forgotNewPin,setForgotNewPin]=useState("");
+  const [forgotConfirmPin,setForgotConfirmPin]=useState("");
+  const [forgotResetToken,setForgotResetToken]=useState("");
+  const [forgotLoading,setForgotLoading]=useState(false);
+  const [forgotError,setForgotError]=useState("");
+  const [forgotSuccess,setForgotSuccess]=useState("");
+
+  const forgotSendCode=async()=>{
+    if(!forgotEmail.trim()||!forgotEmail.includes("@")){setForgotError("Enter a valid email");return;}
+    setForgotLoading(true);setForgotError("");
+    try{
+      const res=await fetch(`${SYNC_URL}/api/auth/session`,{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({action:"send_reset_code",email:forgotEmail.trim().toLowerCase()})});
+      // Always advance — we don't reveal if email exists
+      setSignInStep("forgot_code");
+      setForgotSuccess("If that email exists, a code was sent. Check your inbox.");
+    }catch(e){setForgotError("Connection failed. Try again.");setForgotLoading(false);return;}
+    setForgotLoading(false);
+  };
+
+  const forgotVerifyCode=async()=>{
+    if(forgotCode.length!==6){setForgotError("Enter the 6-digit code from your email");return;}
+    setForgotLoading(true);setForgotError("");setForgotSuccess("");
+    try{
+      const res=await fetch(`${SYNC_URL}/api/auth/session`,{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({action:"verify_reset_code",email:forgotEmail.trim().toLowerCase(),code:forgotCode})});
+      const json=await res.json();
+      if(json.reset_token){
+        setForgotResetToken(json.reset_token);
+        setSignInStep("forgot_newpin");
+        setForgotError("");
+      }else{
+        setForgotError(json.error||(json.attempts_remaining!==undefined?`Wrong code. ${json.attempts_remaining} attempts left`:"Invalid code"));
+      }
+    }catch(e){setForgotError("Connection failed. Try again.");}
+    setForgotLoading(false);
+  };
+
+  const forgotSetPin=async()=>{
+    if(forgotNewPin.length!==6){setForgotError("PIN must be 6 digits");return;}
+    if(forgotNewPin!==forgotConfirmPin){setForgotError("PINs don't match");return;}
+    setForgotLoading(true);setForgotError("");
+    try{
+      const res=await fetch(`${SYNC_URL}/api/auth/session`,{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({action:"set_new_pin",email:forgotEmail.trim().toLowerCase(),resetToken:forgotResetToken,newPin:forgotNewPin})});
+      const json=await res.json();
+      if(json.success){
+        setForgotSuccess("PIN updated! Sign in with your new PIN.");
+        setSignInStep("pin");
+        setSignInEmail(forgotEmail);
+        setSignInPin("");
+        setForgotNewPin("");setForgotConfirmPin("");setForgotResetToken("");
+      }else{
+        setForgotError(json.error||"Failed to update PIN");
+      }
+    }catch(e){setForgotError("Connection failed. Try again.");}
+    setForgotLoading(false);
+  };
+
+  // ─── Email verification state (post-signup) ───
+  const [verifyStep,setVerifyStep]=useState(null); // null | "pending" | "done"
+  const [verifyCode,setVerifyCode]=useState("");
+  const [verifyLoading,setVerifyLoading]=useState(false);
+  const [verifyError,setVerifyError]=useState("");
+  const [verifyCooldown,setVerifyCooldown]=useState(0);
+
+  const verifySendCode=async(emailAddr)=>{
+    try{
+      await fetch(`${SYNC_URL}/api/auth/session`,{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({action:"send_verify_code",email:emailAddr||profile.email})});
+    }catch(e){}
+  };
+
+  const verifyConfirmCode=async()=>{
+    if(verifyCode.length!==6){setVerifyError("Enter the 6-digit code");return;}
+    setVerifyLoading(true);setVerifyError("");
+    try{
+      const res=await fetch(`${SYNC_URL}/api/auth/session`,{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({action:"confirm_verify_code",email:profile.email,code:verifyCode})});
+      const json=await res.json();
+      if(json.verified||json.already_verified){
+        setVerifyStep("done");
+        LS.set("ft-email-verified","true");
+        setTimeout(()=>{d({type:"ONBOARDED"});},1200);
+      }else{
+        setVerifyError(json.error||"Incorrect code");
+      }
+    }catch(e){setVerifyError("Connection failed.");}
+    setVerifyLoading(false);
+  };
+
+  const verifyResend=async()=>{
+    if(verifyCooldown>0)return;
+    await verifySendCode(profile.email);
+    setVerifyCooldown(60);
+    const t=setInterval(()=>setVerifyCooldown(c=>{if(c<=1){clearInterval(t);return 0;}return c-1;}),1000);
+  };
 
   const signIn=async()=>{
     if(signInStep==="email"){
@@ -5360,6 +5467,61 @@ function Onboarding({d}){
   const isAndroid=/Android/.test(navigator.userAgent);
   const isStandalone=window.matchMedia("(display-mode: standalone)").matches||window.navigator.standalone;
 
+  // ─── Email Verification Screen (shown after signup completes) ───
+  if(verifyStep==="pending"||verifyStep==="done"){
+    return(
+      <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",
+        background:V.bg,padding:24}}>
+        <div style={{width:"100%",maxWidth:360,textAlign:"center"}}>
+          <div style={{width:64,height:64,borderRadius:18,background:`linear-gradient(135deg,${V.accent},${V.accent2})`,
+            display:"inline-flex",alignItems:"center",justifyContent:"center",marginBottom:20}}>
+            <span style={{fontSize:32}}>{verifyStep==="done"?"✓":"📧"}</span>
+          </div>
+          {verifyStep==="done"?(
+            <>
+              <div style={{fontSize:22,fontWeight:800,color:V.text,marginBottom:8}}>Email Verified!</div>
+              <div style={{fontSize:13,color:V.text3}}>Taking you to IronLog...</div>
+            </>
+          ):(
+            <>
+              <div style={{fontSize:22,fontWeight:800,color:V.text,marginBottom:8}}>Check your email</div>
+              <div style={{fontSize:13,color:V.text3,marginBottom:24,lineHeight:1.6}}>
+                We sent a 6-digit code to<br/>
+                <span style={{color:V.accent,fontWeight:600}}>{profile.email}</span>
+              </div>
+              <input type="text" inputMode="numeric" value={verifyCode}
+                onChange={e=>setVerifyCode(e.target.value.replace(/\D/g,"").slice(0,6))}
+                placeholder="000000" maxLength={6} autoComplete="one-time-code"
+                autoFocus
+                onKeyDown={e=>{if(e.key==="Enter"&&verifyCode.length===6)verifyConfirmCode();}}
+                style={{width:"100%",padding:"16px",background:"rgba(255,255,255,0.04)",
+                  border:`2px solid ${verifyCode.length===6?V.accent:V.cardBorder}`,
+                  borderRadius:12,color:V.text,fontSize:28,textAlign:"center",fontFamily:V.mono,
+                  letterSpacing:14,outline:"none",boxSizing:"border-box",marginBottom:8,
+                  transition:"border-color .2s"}}/>
+              {verifyError&&<div style={{fontSize:11,color:V.danger,marginBottom:8}}>{verifyError}</div>}
+              <Btn full onClick={verifyConfirmCode} disabled={verifyLoading||verifyCode.length!==6} s={{marginBottom:12}}>
+                {verifyLoading?"Verifying...":"Verify Email"}
+              </Btn>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:12}}>
+                <button onClick={verifyResend} disabled={verifyCooldown>0}
+                  style={{background:"none",border:"none",cursor:verifyCooldown>0?"default":"pointer",
+                    fontFamily:V.font,fontSize:12,color:verifyCooldown>0?V.text3:V.accent,padding:0}}>
+                  {verifyCooldown>0?`Resend in ${verifyCooldown}s`:"Resend code"}
+                </button>
+                <span style={{color:V.text3,fontSize:12}}>·</span>
+                <button onClick={()=>{LS.set("ft-email-verified","skipped");d({type:"ONBOARDED"});}}
+                  style={{background:"none",border:"none",cursor:"pointer",fontFamily:V.font,fontSize:12,color:V.text3,padding:0}}>
+                  Skip for now
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   const steps=[
     // Step 0: Welcome
     ()=>(
@@ -5414,13 +5576,64 @@ function Onboarding({d}){
                         background:i<signInPin.length?V.accent:"rgba(255,255,255,0.1)",transition:"all .15s"}}/>
                     ))}
                   </div>
+                  <button onClick={()=>{setSignInStep("forgot");setForgotEmail(signInEmail);setForgotError("");setForgotSuccess("");}} style={{background:"none",border:"none",cursor:"pointer",padding:0,display:"block",margin:"0 auto 8px",fontFamily:V.font}}>
+                    <span style={{fontSize:11,color:V.accent}}>Forgot PIN?</span>
+                  </button>
                 </div>
-              )}
-              {signInError&&<div style={{fontSize:11,color:V.danger,marginBottom:8}}>{signInError}</div>}
+              ):signInStep==="forgot"?(
+                <div>
+                  <div style={{fontSize:13,fontWeight:700,color:V.text,marginBottom:4}}>Reset your PIN</div>
+                  <div style={{fontSize:10,color:V.text3,marginBottom:10}}>Enter your email and we\'ll send a reset code.</div>
+                  <input type="email" value={forgotEmail} onChange={e=>setForgotEmail(e.target.value)}
+                    placeholder="you@email.com" autoComplete="email"
+                    onKeyDown={e=>{if(e.key==="Enter")forgotSendCode();}}
+                    style={{width:"100%",padding:"12px 14px",background:"rgba(255,255,255,0.04)",border:`1px solid ${V.cardBorder}`,
+                      borderRadius:10,color:V.text,fontSize:14,outline:"none",boxSizing:"border-box",fontFamily:V.font,marginBottom:8}}/>
+                </div>
+              ):signInStep==="forgot_code"?(
+                <div>
+                  <div style={{fontSize:13,fontWeight:700,color:V.text,marginBottom:4}}>Enter reset code</div>
+                  <div style={{fontSize:10,color:V.text3,marginBottom:10}}>Check your email for a 6-digit code.</div>
+                  {forgotSuccess&&<div style={{fontSize:11,color:V.accent2,marginBottom:8}}>{forgotSuccess}</div>}
+                  <input type="text" inputMode="numeric" value={forgotCode}
+                    onChange={e=>setForgotCode(e.target.value.replace(/\D/g,"").slice(0,6))}
+                    placeholder="000000" maxLength={6} autoComplete="one-time-code"
+                    onKeyDown={e=>{if(e.key==="Enter"&&forgotCode.length===6)forgotVerifyCode();}}
+                    style={{width:"100%",padding:"14px",background:"rgba(255,255,255,0.04)",border:`1px solid ${V.cardBorder}`,
+                      borderRadius:10,color:V.text,fontSize:24,textAlign:"center",fontFamily:V.mono,letterSpacing:12,
+                      outline:"none",boxSizing:"border-box",marginBottom:8}}/>
+                </div>
+              ):signInStep==="forgot_newpin"?(
+                <div>
+                  <div style={{fontSize:13,fontWeight:700,color:V.text,marginBottom:4}}>Set new PIN</div>
+                  <div style={{fontSize:10,color:V.text3,marginBottom:10}}>Choose a new 6-digit PIN.</div>
+                  <input type="password" inputMode="numeric" value={forgotNewPin}
+                    onChange={e=>setForgotNewPin(e.target.value.replace(/\D/g,"").slice(0,6))}
+                    placeholder="New PIN" maxLength={6}
+                    style={{width:"100%",padding:"12px 14px",background:"rgba(255,255,255,0.04)",border:`1px solid ${V.cardBorder}`,
+                      borderRadius:10,color:V.text,fontSize:20,textAlign:"center",fontFamily:V.mono,letterSpacing:8,
+                      outline:"none",boxSizing:"border-box",marginBottom:8}}/>
+                  <input type="password" inputMode="numeric" value={forgotConfirmPin}
+                    onChange={e=>setForgotConfirmPin(e.target.value.replace(/\D/g,"").slice(0,6))}
+                    placeholder="Confirm PIN" maxLength={6}
+                    onKeyDown={e=>{if(e.key==="Enter")forgotSetPin();}}
+                    style={{width:"100%",padding:"12px 14px",background:"rgba(255,255,255,0.04)",border:`1px solid ${V.cardBorder}`,
+                      borderRadius:10,color:V.text,fontSize:20,textAlign:"center",fontFamily:V.mono,letterSpacing:8,
+                      outline:"none",boxSizing:"border-box",marginBottom:8}}/>
+                </div>
+              ):null}
+              {(signInError||forgotError)&&<div style={{fontSize:11,color:V.danger,marginBottom:8}}>{signInError||forgotError}</div>}
               <div style={{display:"flex",gap:8}}>
-                <Btn v="secondary" onClick={()=>{setShowSignIn(false);setSignInError("");setSignInStep("email");setSignInPin("");}}>Cancel</Btn>
-                <Btn full onClick={signIn} disabled={signInLoading}>
-                  {signInLoading?"Checking...":(signInStep==="email"?"Continue":"Sign In")}
+                <Btn v="secondary" onClick={()=>{setShowSignIn(false);setSignInError("");setSignInStep("email");setSignInPin("");setForgotError("");setForgotCode("");setForgotNewPin("");setForgotConfirmPin("");}}>Cancel</Btn>
+                <Btn full
+                  onClick={signInStep==="forgot"?forgotSendCode:signInStep==="forgot_code"?forgotVerifyCode:signInStep==="forgot_newpin"?forgotSetPin:signIn}
+                  disabled={signInLoading||forgotLoading}>
+                  {(signInLoading||forgotLoading)?"...":
+                    signInStep==="email"?"Continue":
+                    signInStep==="pin"?"Sign In":
+                    signInStep==="forgot"?"Send Code":
+                    signInStep==="forgot_code"?"Verify Code":
+                    signInStep==="forgot_newpin"?"Save PIN":"Continue"}
                 </Btn>
               </div>
             </div>
@@ -10397,9 +10610,9 @@ function MessagesTab({s,d}){
     });
   },[email]);
 
-  // Re-render inbox every 10s so LS-backed unread counts + previews stay live
+  // Re-render inbox every 30s so LS-backed unread counts + previews stay live
   useEffect(()=>{
-    const iv=setInterval(()=>setTick(t=>t+1),10000);
+    const iv=setInterval(()=>setTick(t=>t+1),30000);
     return()=>clearInterval(iv);
   },[]);
 
@@ -10693,8 +10906,14 @@ function IMConversation({s,email,displayName,friend,onBack}){
           LS.set(`ft-unread-${friend.email}`,0);
         }
       });
-    },8000);
-    return()=>clearInterval(poll);
+    },document.visibilityState==="visible"?8000:90000);
+    // Restart at correct rate on visibility change
+    const dmVisHandler=()=>{
+      clearInterval(poll);
+      // poll immediately on return to foreground — handled by restart
+    };
+    document.addEventListener("visibilitychange",dmVisHandler);
+    return()=>{clearInterval(poll);document.removeEventListener("visibilitychange",dmVisHandler);};
   },[email,friend.email]);
 
   const handleImg=async(e)=>{
@@ -12445,10 +12664,15 @@ function App(){
     };
     // Initial poll after 3s
     const initTimer=setTimeout(poll,3000);
-    // Then every 15s
-    pollTimer=setInterval(poll,15000);
-    // Re-poll when tab becomes visible
-    const visHandler=()=>{if(document.visibilityState==="visible")poll();};
+    // Visibility-aware interval: 15s when visible, 60s when backgrounded
+    const getInterval=()=>document.visibilityState==="visible"?15000:60000;
+    pollTimer=setInterval(poll,getInterval());
+    // On visibility change: re-poll immediately if returning to foreground, restart interval at correct rate
+    const visHandler=()=>{
+      clearInterval(pollTimer);
+      if(document.visibilityState==="visible")poll();
+      pollTimer=setInterval(poll,getInterval());
+    };
     document.addEventListener("visibilitychange",visHandler);
     return()=>{clearTimeout(initTimer);clearInterval(pollTimer);document.removeEventListener("visibilitychange",visHandler);};
   },[s.onboarded,s.profile?.email]);  // s.tab removed — read via tabRef to avoid restarting interval on every nav
