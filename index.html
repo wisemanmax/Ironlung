@@ -5559,7 +5559,7 @@ function Onboarding({d}){
                     style={{width:"100%",padding:"12px 14px",background:"rgba(255,255,255,0.04)",border:`1px solid ${V.cardBorder}`,
                       borderRadius:10,color:V.text,fontSize:14,outline:"none",boxSizing:"border-box",fontFamily:V.font,marginBottom:8}}/>
                 </div>
-              ):(
+              ):signInStep==="pin"?(
                 <div>
                   <div style={{fontSize:13,fontWeight:700,color:V.text,marginBottom:4}}>Enter your 6-digit PIN</div>
                   <div style={{fontSize:10,color:V.text3,marginBottom:10}}>This is the PIN you created when you signed up.</div>
@@ -5570,20 +5570,21 @@ function Onboarding({d}){
                     style={{width:"100%",padding:"14px",background:"rgba(255,255,255,0.04)",border:`1px solid ${V.cardBorder}`,
                       borderRadius:10,color:V.text,fontSize:24,textAlign:"center",fontFamily:V.mono,letterSpacing:12,
                       outline:"none",boxSizing:"border-box",marginBottom:4}}/>
-                  <div style={{display:"flex",justifyContent:"center",gap:6,marginBottom:8}}>
-                    {[0,1,2,3,4,5].map(i=>(
+                  <div style={{display:"flex",justifyContent:"center",gap:6,marginBottom:8}}>{
+                    [0,1,2,3,4,5].map(i=>(
                       <div key={i} style={{width:8,height:8,borderRadius:4,
                         background:i<signInPin.length?V.accent:"rgba(255,255,255,0.1)",transition:"all .15s"}}/>
-                    ))}
-                  </div>
-                  <button onClick={()=>{setSignInStep("forgot");setForgotEmail(signInEmail);setForgotError("");setForgotSuccess("");}} style={{background:"none",border:"none",cursor:"pointer",padding:0,display:"block",margin:"0 auto 8px",fontFamily:V.font}}>
+                    ))
+                  }</div>
+                  <button onClick={()=>{setSignInStep("forgot");setForgotEmail(signInEmail);setForgotError("");setForgotSuccess("");}}
+                    style={{background:"none",border:"none",cursor:"pointer",padding:0,display:"block",margin:"0 auto 8px",fontFamily:V.font}}>
                     <span style={{fontSize:11,color:V.accent}}>Forgot PIN?</span>
                   </button>
                 </div>
               ):signInStep==="forgot"?(
                 <div>
                   <div style={{fontSize:13,fontWeight:700,color:V.text,marginBottom:4}}>Reset your PIN</div>
-                  <div style={{fontSize:10,color:V.text3,marginBottom:10}}>Enter your email and we\'ll send a reset code.</div>
+                  <div style={{fontSize:10,color:V.text3,marginBottom:10}}>Enter your email and we will send a reset code.</div>
                   <input type="email" value={forgotEmail} onChange={e=>setForgotEmail(e.target.value)}
                     placeholder="you@email.com" autoComplete="email"
                     onKeyDown={e=>{if(e.key==="Enter")forgotSendCode();}}
