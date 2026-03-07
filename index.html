@@ -535,6 +535,21 @@ const SocialAPI={
     try{const r=await fetch(`${SYNC_URL}/api/social`,{method:"POST",headers:SocialAPI._headers(email),body:JSON.stringify({route:"set_username",email,username})});return r.ok?await r.json():null;}catch(e){return null;}
   },
 
+  // Sync profile avatar + banner to server so friends can see them
+  updateProfile:async(email,{avatar,banner,bio,username})=>{
+    try{const r=await fetch(`${SYNC_URL}/api/social`,{method:"POST",headers:SocialAPI._headers(email),body:JSON.stringify({route:"update_profile",email,avatar,banner,bio,username})});return r.ok?await r.json():null;}catch(e){return null;}
+  },
+
+  // Trigger a push notification to a DM recipient (server sends web push if they have it enabled)
+  notifyDM:async(email,friendEmail,name,text,imageMsg)=>{
+    try{await fetch(`${SYNC_URL}/api/push`,{method:"POST",headers:SocialAPI._headers(email),body:JSON.stringify({action:"notify_dm",from:email,to:friendEmail,name,text:imageMsg?"📷 Photo":text})});}catch(e){}
+  },
+
+  // Send a DM with optional image attachment
+  sendDMImage:async(email,friendEmail,imageData,name)=>{
+    try{const r=await fetch(`${SYNC_URL}/api/social?route=feed`,{method:"POST",headers:SocialAPI._headers(email),body:JSON.stringify({route:"feed",email,action:"log_event",type:"DirectMessage",data:{to:friendEmail,text:"📷 Photo",name,imageData},visibility:"private"})});return r.ok?await r.json():null;}catch(e){return null;}
+  },
+
   // Profile lookup
   getProfile:async(username)=>{
     try{const r=await fetch(`${SYNC_URL}/api/social?route=profile&username=${username}`);return r.ok?await r.json():null;}catch(e){return null;}
@@ -9876,7 +9891,10 @@ function SocialFriends({s,d}){
         // never appear in the getDMs results. The API now returns friendLastRead directly.
         const lastFriendRead=r.friendLastRead||null;
         const msgs=(r.messages||[]).map(m=>({
-          ...m,read:m.isOwn&&lastFriendRead&&new Date(m.ts)<=new Date(lastFriendRead)
+          ...m,
+          imageData:m.data?.imageData||m.imageData||null,
+          text:m.data?.imageData?"📷 Photo":(m.text||""),
+          read:m.isOwn&&lastFriendRead&&new Date(m.ts)<=new Date(lastFriendRead)
         }));
         setDmMessages(msgs);LS.set(`ft-dm-${friendEmail}`,msgs);
         setDmHasMore(!!r.hasMore);
@@ -9906,18 +9924,49 @@ function SocialFriends({s,d}){
       setDmLoadingOlder(false);
     });
   };
+  const [dmImagePreview,setDmImagePreview]=useState(null); // base64 of pending image
+  const dmImgRef=useRef(null);
+
+  const handleDmImage=async(e)=>{
+    const file=e.target.files?.[0];if(!file)return;
+    const compressed=await compressImage(file,600,0.72);
+    if(compressed)setDmImagePreview(compressed);
+    e.target.value="";
+  };
+
   const sendDM=(friendEmail)=>{
-    if(!dmInput.trim()||dmInput.length>200)return;
+    if(!dmInput.trim()&&!dmImagePreview)return;
+    if(dmInput.length>200)return;
     Haptic.light();
-    const msg={id:Date.now(),from:email,name:displayName,text:dmInput.trim(),ts:new Date().toISOString(),isOwn:true};
-    const updated=[...dmMessages,msg].slice(-100);
-    setDmMessages(updated);LS.set(`ft-dm-${friendEmail}`,updated);
-    SocialAPI.sendDM(email,friendEmail,dmInput.trim(),displayName);
-    setDmInput("");
+    if(dmImagePreview){
+      const msg={id:Date.now(),from:email,name:displayName,text:"📷 Photo",imageData:dmImagePreview,ts:new Date().toISOString(),isOwn:true};
+      const updated=[...dmMessages,msg].slice(-100);
+      setDmMessages(updated);LS.set(`ft-dm-${friendEmail}`,updated);
+      SocialAPI.sendDMImage(email,friendEmail,dmImagePreview,displayName);
+      SocialAPI.notifyDM(email,friendEmail,displayName,"",true);
+      setDmImagePreview(null);
+    }
+    if(dmInput.trim()){
+      const msg={id:Date.now(),from:email,name:displayName,text:dmInput.trim(),ts:new Date().toISOString(),isOwn:true};
+      const updated=[...dmMessages,msg].slice(-100);
+      setDmMessages(updated);LS.set(`ft-dm-${friendEmail}`,updated);
+      SocialAPI.sendDM(email,friendEmail,dmInput.trim(),displayName);
+      SocialAPI.notifyDM(email,friendEmail,displayName,dmInput.trim(),false);
+      setDmInput("");
+    }
     setTimeout(()=>dmEndRef.current?.scrollIntoView({behavior:"smooth"}),100);
   };
   const openFriendChat=(f)=>{setViewFriend(f);setFriendTab("chat");loadDMs(f.email);LS.set(`ft-unread-${f.email}`,0);LS.set(`ft-last-read-${f.email}`,new Date().toISOString());};
   const openFriendProfile=(f)=>{setViewFriend(f);setFriendTab("profile");};
+
+  // Auto-open DM chat if navigated here from a push notification
+  useEffect(()=>{
+    const fromEmail=LS.get("ft-open-dm-from");
+    if(fromEmail&&friendsData?.friends){
+      const f=friendsData.friends.find(fr=>fr.email===fromEmail);
+      if(f){openFriendChat(f);LS.remove?.("ft-open-dm-from")||LS.set("ft-open-dm-from",null);}
+    }
+  },[friendsData]);
   const sendQuickMsg=async(fe,msg)=>{await SocialAPI.logEvent(email,"QuickMessage",{to:fe,msg},"friends");SuccessToastCtrl.show("Sent!");};
 
   if(compareWith)return(
@@ -9964,27 +10013,41 @@ function SocialFriends({s,d}){
 
       {/* Profile tab */}
       {friendTab==="profile"&&(<>
-        <Card style={{padding:16,textAlign:"center"}}>
-          <div style={{width:48,height:48,borderRadius:14,background:`linear-gradient(135deg,${V.purple},#ec4899)`,display:"inline-flex",alignItems:"center",justifyContent:"center",marginBottom:8}}>
-            <span style={{fontSize:20,color:V.bg,fontWeight:900}}>{(viewFriend.name||"?")[0].toUpperCase()}</span>
+        <Card style={{padding:0,overflow:"hidden",textAlign:"center"}}>
+          {/* Banner */}
+          <div style={{width:"100%",height:90,
+            background:viewFriend.banner?"none":`linear-gradient(135deg,${V.purple}40,#ec489940)`,overflow:"hidden",flexShrink:0}}>
+            {viewFriend.banner&&<img src={viewFriend.banner} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>}
           </div>
-          <div style={{fontSize:16,fontWeight:800,color:V.text}}>{viewFriend.name}</div>
-          {viewFriend.username&&<div style={{fontSize:11,color:V.text3}}>@{viewFriend.username}</div>}
-          {viewFriend.badges?.length>0&&(
-            <div style={{display:"flex",flexWrap:"wrap",gap:4,justifyContent:"center",margin:"8px 0"}}>
-              {viewFriend.badges.map((b,i)=><span key={i} style={{padding:"2px 8px",borderRadius:6,background:V.accent+"08",fontSize:9,color:V.accent}}>{b}</span>)}
+          {/* Avatar overlapping banner */}
+          <div style={{padding:"0 16px 16px",marginTop:-30}}>
+            <div style={{width:60,height:60,borderRadius:16,
+              background:viewFriend.avatar?"none":`linear-gradient(135deg,${V.purple},#ec4899)`,
+              display:"inline-flex",alignItems:"center",justifyContent:"center",
+              overflow:"hidden",border:`3px solid ${V.bg}`,boxShadow:"0 4px 12px rgba(0,0,0,0.4)",marginBottom:8}}>
+              {viewFriend.avatar
+                ?<img src={viewFriend.avatar} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>
+                :<span style={{fontSize:22,color:V.bg,fontWeight:900}}>{(viewFriend.name||"?")[0].toUpperCase()}</span>}
             </div>
-          )}
-          {viewFriend.challenges?.length>0&&(
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,margin:"10px 0"}}>
-              {viewFriend.challenges.map((c,i)=>(
-                <div key={i} style={{padding:6,borderRadius:6,background:"rgba(255,255,255,0.02)"}}>
-                  <div style={{fontSize:14,fontWeight:800,color:V.accent,fontFamily:V.mono}}>{c.value}</div>
-                  <div style={{fontSize:8,color:V.text3,textTransform:"uppercase"}}>{c.challenge_id}</div>
-                </div>
-              ))}
-            </div>
-          )}
+            <div style={{fontSize:16,fontWeight:800,color:V.text}}>{viewFriend.name}</div>
+            {viewFriend.username&&<div style={{fontSize:11,color:V.text3}}>@{viewFriend.username}</div>}
+            {viewFriend.bio&&<div style={{fontSize:11,color:V.text2,lineHeight:1.5,fontStyle:"italic",margin:"6px auto",maxWidth:260}}>{viewFriend.bio}</div>}
+            {viewFriend.badges?.length>0&&(
+              <div style={{display:"flex",flexWrap:"wrap",gap:4,justifyContent:"center",margin:"8px 0"}}>
+                {viewFriend.badges.map((b,i)=><span key={i} style={{padding:"2px 8px",borderRadius:6,background:V.accent+"08",fontSize:9,color:V.accent}}>{b}</span>)}
+              </div>
+            )}
+            {viewFriend.challenges?.length>0&&(
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,margin:"10px 0"}}>
+                {viewFriend.challenges.map((c,i)=>(
+                  <div key={i} style={{padding:6,borderRadius:6,background:"rgba(255,255,255,0.02)"}}>
+                    <div style={{fontSize:14,fontWeight:800,color:V.accent,fontFamily:V.mono}}>{c.value}</div>
+                    <div style={{fontSize:10,color:V.text3,textTransform:"uppercase"}}>{c.challenge_id}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </Card>
         {/* #2: Streak comparison */}
         {viewFriend.challenges?.find(c=>c.challenge_id==="streak")&&(
@@ -10068,19 +10131,36 @@ function SocialFriends({s,d}){
                 <div style={{fontSize:11,color:V.text3,marginTop:4}}>Messages are private between you and {viewFriend.name}</div>
               </div>
             )}
-            {dmMessages.map((m,i)=>(
-              <div key={m.id||i} style={{maxWidth:"80%",padding:"10px 14px",borderRadius:16,fontSize:13,lineHeight:1.5,
-                ...(m.isOwn||m.from===email
-                  ?{alignSelf:"flex-end",background:`${V.accent}15`,color:V.text,borderBottomRightRadius:4}
-                  :{alignSelf:"flex-start",background:V.card,border:`1px solid ${V.cardBorder}`,color:V.text2,borderBottomLeftRadius:4})}}>
-                {m.from!==email&&!m.isOwn&&<div style={{fontSize:9,fontWeight:700,color:V.purple,marginBottom:2}}>{m.name}</div>}
-                <div style={{wordBreak:"break-word"}}>{m.text}</div>
-                <div style={{fontSize:8,color:V.text3,marginTop:4,display:"flex",justifyContent:m.isOwn||m.from===email?"flex-end":"flex-start",alignItems:"center",gap:4}}>
-                  <span>{new Date(m.ts).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"})}</span>
-                  {(m.isOwn||m.from===email)&&<span style={{color:m.read?V.accent:V.text3,fontSize:9}}>{m.read?"✓✓":"✓"}</span>}
-                </div>
+            {dmMessages.map((m,i)=>{
+              const isOwn=m.isOwn||m.from===email;
+              return(
+              <div key={m.id||i} style={{maxWidth:"80%",
+                padding:m.imageData?"4px":"10px 14px",borderRadius:16,fontSize:13,lineHeight:1.5,overflow:"hidden",
+                ...(isOwn
+                  ?{alignSelf:"flex-end",background:m.imageData?"transparent":`${V.accent}15`,color:V.text,borderBottomRightRadius:4}
+                  :{alignSelf:"flex-start",background:m.imageData?"transparent":V.card,border:m.imageData?"none":`1px solid ${V.cardBorder}`,color:V.text2,borderBottomLeftRadius:4})}}>
+                {!isOwn&&<div style={{fontSize:9,fontWeight:700,color:V.purple,marginBottom:2,paddingLeft:m.imageData?4:0}}>{m.name}</div>}
+                {m.imageData?(
+                  <div style={{position:"relative"}}>
+                    <img src={m.imageData} alt="Photo" style={{display:"block",maxWidth:"100%",maxHeight:280,borderRadius:12,objectFit:"cover"}}/>
+                    <div style={{position:"absolute",bottom:6,right:6,fontSize:8,color:"rgba(255,255,255,0.85)",
+                      background:"rgba(0,0,0,0.45)",borderRadius:4,padding:"2px 5px",display:"flex",gap:3}}>
+                      <span>{new Date(m.ts).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"})}</span>
+                      {isOwn&&<span style={{color:m.read?"#6ee7b7":"rgba(255,255,255,0.6)"}}>{m.read?"✓✓":"✓"}</span>}
+                    </div>
+                  </div>
+                ):(
+                  <>
+                    <div style={{wordBreak:"break-word"}}>{m.text}</div>
+                    <div style={{fontSize:8,color:V.text3,marginTop:4,display:"flex",justifyContent:isOwn?"flex-end":"flex-start",alignItems:"center",gap:4}}>
+                      <span>{new Date(m.ts).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"})}</span>
+                      {isOwn&&<span style={{color:m.read?V.accent:V.text3,fontSize:9}}>{m.read?"✓✓":"✓"}</span>}
+                    </div>
+                  </>
+                )}
               </div>
-            ))}
+              );
+            })}
             <div ref={dmEndRef}/>
           </div>
           {/* Quick reply chips */}
@@ -10091,8 +10171,42 @@ function SocialFriends({s,d}){
                 fontSize:10,color:V.text3,fontFamily:V.font,whiteSpace:"nowrap",flexShrink:0}}>{msg}</button>
             ))}
           </div>
+          {/* Image preview before send */}
+          {dmImagePreview&&(
+            <div style={{position:"relative",display:"inline-block",marginBottom:6}}>
+              <img src={dmImagePreview} alt="Preview" style={{maxHeight:120,maxWidth:"60%",borderRadius:10,display:"block"}}/>
+              <button onClick={()=>setDmImagePreview(null)}
+                style={{position:"absolute",top:4,right:4,width:20,height:20,borderRadius:10,background:"rgba(0,0,0,0.6)",
+                  border:"none",cursor:"pointer",color:"#fff",fontSize:10,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+            </div>
+          )}
+          {/* Notification prompt — inline banner if push not enabled */}
+          {Notification.permission==="default"&&(
+            <div style={{display:"flex",alignItems:"center",gap:8,padding:"6px 10px",borderRadius:8,
+              background:`${V.accent}08`,border:`1px solid ${V.accent}20`,marginBottom:4}}>
+              <span style={{fontSize:11,color:V.text2,flex:1}}>🔔 Enable notifications to get message alerts</span>
+              <button onClick={async()=>{
+                const p=await Notification.requestPermission();
+                if(p==="granted"&&"serviceWorker" in navigator){
+                  const reg=await navigator.serviceWorker.ready;
+                  const vapidKey="BMZyIUQO08nuR7afvqNIWBK_ZOcr7PHwT2YwIxTa_ONwAD1YCaJ8Qkb4q4TTYSx_sTN-7-5vCzR8ApNZuyg-Ttc";
+                  const keyBytes=Uint8Array.from(atob(vapidKey.replace(/-/g,"+").replace(/_/g,"/")),c=>c.charCodeAt(0));
+                  const sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:keyBytes}).catch(()=>null);
+                  if(sub){await fetch(`${SYNC_URL}/api/push`,{method:"POST",headers:SocialAPI._headers(email),body:JSON.stringify({action:"subscribe",email,subscription:sub.toJSON()})});SuccessToastCtrl.show("Notifications enabled 🔔");}
+                }
+              }} style={{padding:"4px 10px",borderRadius:6,background:V.accent,border:"none",cursor:"pointer",
+                fontSize:11,fontWeight:700,color:V.bg,flexShrink:0}}>Enable</button>
+            </div>
+          )}
           {/* Input */}
+          <input ref={dmImgRef} type="file" accept="image/*" onChange={handleDmImage} style={{display:"none"}}/>
           <div style={{display:"flex",gap:8,paddingTop:6,borderTop:`1px solid ${V.cardBorder}`}}>
+            {/* Image attach button */}
+            <button onClick={()=>dmImgRef.current?.click()} style={{width:44,height:44,borderRadius:12,flexShrink:0,
+              background:"rgba(255,255,255,0.04)",border:`1px solid ${V.cardBorder}`,cursor:"pointer",
+              display:"flex",alignItems:"center",justifyContent:"center"}}>
+              <span style={{fontSize:18}}>📷</span>
+            </button>
             <div style={{flex:1,position:"relative"}}>
               <input value={dmInput} onChange={e=>{if(e.target.value.length<=200)setDmInput(e.target.value);}}
                 placeholder="Message..." maxLength={200}
@@ -10102,11 +10216,11 @@ function SocialFriends({s,d}){
               {dmInput.length>0&&<span style={{position:"absolute",right:10,bottom:-14,fontSize:8,
                 color:dmInput.length>180?V.danger:V.text3}}>{dmInput.length}/200</span>}
             </div>
-            <button onClick={()=>sendDM(viewFriend.email)} disabled={!dmInput.trim()||dmInput.length>200}
-              style={{width:44,height:44,borderRadius:12,background:dmInput.trim()?V.accent:"rgba(255,255,255,0.04)",
-                border:"none",cursor:dmInput.trim()?"pointer":"default",display:"flex",alignItems:"center",justifyContent:"center",
+            <button onClick={()=>sendDM(viewFriend.email)} disabled={!dmInput.trim()&&!dmImagePreview}
+              style={{width:44,height:44,borderRadius:12,background:(dmInput.trim()||dmImagePreview)?V.accent:"rgba(255,255,255,0.04)",
+                border:"none",cursor:(dmInput.trim()||dmImagePreview)?"pointer":"default",display:"flex",alignItems:"center",justifyContent:"center",
                 flexShrink:0,transition:"background .2s"}}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={dmInput.trim()?V.bg:V.text3} strokeWidth="2" strokeLinecap="round">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={(dmInput.trim()||dmImagePreview)?V.bg:V.text3} strokeWidth="2" strokeLinecap="round">
                 <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
               </svg>
             </button>
@@ -10560,20 +10674,60 @@ function SocialProfile({s,d}){
   const [bio,setBio]=useState(s.profile?.bio||LS.get("ft-bio")||"");
   const [editBio,setEditBio]=useState(false);
   const profilePic=LS.get("ft-profile-pic");
+  const bannerPic=LS.get("ft-profile-banner");
   const picRef=useRef(null);
+  const bannerRef=useRef(null);
+
+  const syncProfile=(extra)=>{
+    if(!email)return;
+    SocialAPI.updateProfile(email,{
+      avatar:LS.get("ft-profile-pic"),
+      banner:LS.get("ft-profile-banner"),
+      bio:LS.get("ft-bio"),
+      username:LS.get("ft-username"),
+      ...extra
+    });
+  };
 
   const handleProfilePic=async(e)=>{
     const file=e.target.files?.[0];if(!file)return;
     const compressed=await compressImage(file,200,0.7);
     if(compressed){LS.set("ft-profile-pic",compressed);SuccessToastCtrl.show("Profile photo updated");
-      d({type:"SET_PROFILE",profile:{...s.profile,avatar:compressed}});}
+      d({type:"SET_PROFILE",profile:{...s.profile,avatar:compressed}});
+      syncProfile({avatar:compressed});}
     e.target.value="";
   };
+
+  const handleBanner=async(e)=>{
+    const file=e.target.files?.[0];if(!file)return;
+    // Banner: wide crop, lower quality — 900×300 effective canvas
+    const banner=await (()=>new Promise(resolve=>{
+      const img=new Image();
+      img.onload=()=>{
+        URL.revokeObjectURL(img.src);
+        const targetW=900,targetH=300;
+        const srcRatio=img.width/img.height,tgtRatio=targetW/targetH;
+        let sx=0,sy=0,sw=img.width,sh=img.height;
+        if(srcRatio>tgtRatio){sw=img.height*tgtRatio;sx=(img.width-sw)/2;}
+        else{sh=img.width/tgtRatio;sy=(img.height-sh)/2;}
+        const c=document.createElement("canvas");c.width=targetW;c.height=targetH;
+        c.getContext("2d").drawImage(img,sx,sy,sw,sh,0,0,targetW,targetH);
+        resolve(c.toDataURL("image/jpeg",0.65));
+      };
+      img.onerror=()=>{URL.revokeObjectURL(img.src);resolve(null);};
+      img.src=URL.createObjectURL(file);
+    }))();
+    if(banner){LS.set("ft-profile-banner",banner);SuccessToastCtrl.show("Banner updated");
+      syncProfile({banner});}
+    e.target.value="";
+  };
+
   const saveBio=()=>{
     const trimmed=bio.trim().slice(0,120);
     LS.set("ft-bio",trimmed);
     d({type:"SET_PROFILE",profile:{...s.profile,bio:trimmed}});
     setEditBio(false);SuccessToastCtrl.show("Bio saved");
+    syncProfile({bio:trimmed});
   };
 
   // Friend code: deterministic from email hash
@@ -10597,26 +10751,51 @@ function SocialProfile({s,d}){
     if(clean.length<3){setUnError("Min 3 characters");return;}
     const r=await SocialAPI.setUsername(email,clean);
     if(r?.success){setUsername(r.username);LS.set("ft-username",r.username);LS.set("ft-username-claimed",true);
-      setEditingUn(false);setUnError("");SuccessToastCtrl.show(`Username set to @${r.username}`);}
+      setEditingUn(false);setUnError("");SuccessToastCtrl.show(`Username set to @${r.username}`);
+      syncProfile({username:r.username});}
     else setUnError(r?.error||"Failed");
   };
 
   return(
     <div style={{display:"flex",flexDirection:"column",gap:10}}>
-      {/* Profile card */}
-      <Card style={{padding:16,textAlign:"center"}}>
+      {/* Profile card with banner */}
+      <Card style={{padding:0,overflow:"hidden",textAlign:"center"}}>
         <input ref={picRef} type="file" accept="image/*" capture="user" onChange={handleProfilePic} style={{display:"none"}}/>
-        <div onClick={()=>picRef.current?.click()} style={{width:72,height:72,borderRadius:20,
-          background:profilePic?"none":`linear-gradient(135deg,${V.accent},#ec4899)`,
-          display:"inline-flex",alignItems:"center",justifyContent:"center",marginBottom:8,cursor:"pointer",
-          overflow:"hidden",border:profilePic?"none":`3px solid ${V.accent}30`,position:"relative"}}>
-          {profilePic?<img src={profilePic} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>
-            :<span style={{fontSize:28,color:V.bg,fontWeight:900}}>{username[0]?.toUpperCase()}</span>}
-          <div style={{position:"absolute",bottom:0,right:0,width:22,height:22,borderRadius:11,
-            background:V.accent,display:"flex",alignItems:"center",justifyContent:"center",border:`2px solid ${V.bg}`}}>
-            <span style={{fontSize:10,color:V.bg}}>📷</span>
+        <input ref={bannerRef} type="file" accept="image/*" onChange={handleBanner} style={{display:"none"}}/>
+
+        {/* Banner area */}
+        <div onClick={()=>bannerRef.current?.click()} style={{width:"100%",height:110,position:"relative",cursor:"pointer",
+          background:bannerPic?"none":`linear-gradient(135deg,${V.accent}40,${V.purple}40,#ec489940)`,overflow:"hidden"}}>
+          {bannerPic&&<img src={bannerPic} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>}
+          <div style={{position:"absolute",inset:0,background:"rgba(0,0,0,0.18)",display:"flex",alignItems:"center",
+            justifyContent:"center",opacity:0,transition:"opacity .2s"}}
+            onMouseEnter={e=>e.currentTarget.style.opacity=1} onMouseLeave={e=>e.currentTarget.style.opacity=0}>
+            <span style={{fontSize:11,color:"#fff",fontWeight:700,background:"rgba(0,0,0,0.5)",padding:"4px 12px",borderRadius:20}}>Change Banner</span>
+          </div>
+          {/* Always-visible edit hint for mobile */}
+          <div style={{position:"absolute",bottom:6,right:8,background:"rgba(0,0,0,0.5)",borderRadius:6,padding:"3px 8px",
+            display:"flex",alignItems:"center",gap:4}}>
+            <span style={{fontSize:10,color:"#fff"}}>📷</span>
+            <span style={{fontSize:9,color:"rgba(255,255,255,0.85)"}}>Edit banner</span>
           </div>
         </div>
+
+        {/* Avatar — overlaps banner */}
+        <div style={{padding:"0 16px 16px",marginTop:-36}}>
+          <div style={{position:"relative",display:"inline-block",marginBottom:8}}>
+            <div onClick={()=>picRef.current?.click()} style={{width:72,height:72,borderRadius:20,
+              background:profilePic?"none":`linear-gradient(135deg,${V.accent},#ec4899)`,
+              display:"inline-flex",alignItems:"center",justifyContent:"center",cursor:"pointer",
+              overflow:"hidden",border:`3px solid ${V.bg}`,position:"relative",boxShadow:"0 4px 12px rgba(0,0,0,0.4)"}}>
+              {profilePic?<img src={profilePic} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>
+                :<span style={{fontSize:28,color:V.bg,fontWeight:900}}>{username[0]?.toUpperCase()}</span>}
+            </div>
+            <div style={{position:"absolute",bottom:0,right:0,width:22,height:22,borderRadius:11,
+              background:V.accent,display:"flex",alignItems:"center",justifyContent:"center",border:`2px solid ${V.bg}`,
+              pointerEvents:"none"}}>
+              <span style={{fontSize:10,color:V.bg}}>📷</span>
+            </div>
+          </div>
         <div style={{fontSize:18,fontWeight:800,color:V.text}}>{s.profile?.firstName||username}</div>
         {!editingUn?(
           <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:4}}>
@@ -10662,17 +10841,18 @@ function SocialProfile({s,d}){
                   border:`1px solid ${V.cardBorder}`,borderRadius:8,color:V.text,fontSize:12,outline:"none",
                   fontFamily:V.font,resize:"none",boxSizing:"border-box"}}/>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:4}}>
-                <span style={{fontSize:8,color:bio.length>100?V.warn:V.text3}}>{bio.length}/120</span>
+                <span style={{fontSize:10,color:bio.length>100?V.warn:V.text3}}>{bio.length}/120</span>
                 <div style={{display:"flex",gap:4}}>
                   <button onClick={()=>{setEditBio(false);setBio(s.profile?.bio||LS.get("ft-bio")||"");}} style={{padding:"4px 8px",borderRadius:4,
-                    background:"rgba(255,255,255,0.04)",border:`1px solid ${V.cardBorder}`,cursor:"pointer",fontSize:9,color:V.text3}}>Cancel</button>
+                    background:"rgba(255,255,255,0.04)",border:`1px solid ${V.cardBorder}`,cursor:"pointer",fontSize:10,color:V.text3}}>Cancel</button>
                   <button onClick={saveBio} style={{padding:"4px 10px",borderRadius:4,background:V.accent,border:"none",
-                    cursor:"pointer",fontSize:9,fontWeight:700,color:V.bg}}>Save</button>
+                    cursor:"pointer",fontSize:10,fontWeight:700,color:V.bg}}>Save</button>
                 </div>
               </div>
             </div>
           )}
         </div>
+        </div>{/* end padding wrapper */}
       </Card>
 
       {/* Friend Code */}
@@ -11278,7 +11458,11 @@ function App(){
         MsgBannerCtrl.push({name:"Notifications",text:"Push subscription lost. Re-enable in Settings → Notifications.",type:"system"});
         setPushHealth({active:false,endpoint:null});
       }
-      if(e.data?.type==="OPEN_DM"&&e.data.from){d({type:"TAB",tab:"social_friends"});}
+      if(e.data?.type==="OPEN_DM"&&e.data.from){
+        d({type:"TAB",tab:"social_friends"});
+        // Store the sender so SocialFriends can auto-open their chat
+        LS.set("ft-open-dm-from",e.data.from);
+      }
     };
     navigator.serviceWorker.addEventListener("message",handler);
     navigator.serviceWorker.ready.then(reg=>{
@@ -11292,6 +11476,19 @@ function App(){
   // tabRef: captures current tab without making poll interval depend on s.tab
   const tabRef=useRef(s.tab);
   useEffect(()=>{tabRef.current=s.tab;},[s.tab]);
+
+  // On launch from push notification: read ?open-dm= URL param, store for SocialFriends
+  useEffect(()=>{
+    const params=new URLSearchParams(window.location.search);
+    const openDm=params.get("open-dm");
+    if(openDm){
+      LS.set("ft-open-dm-from",decodeURIComponent(openDm));
+      // Clean the URL without a reload
+      const clean=window.location.pathname+(window.location.hash||"");
+      window.history.replaceState({},"",clean);
+      d({type:"TAB",tab:"social_friends"});
+    }
+  },[]);
 
   // Layer 2: Message polling (every 15s when visible)
   useEffect(()=>{

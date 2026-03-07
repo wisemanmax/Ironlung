@@ -132,20 +132,24 @@ self.addEventListener('push', function(e) {
 
 self.addEventListener('notificationclick', function(e) {
   e.notification.close();
-  var notifData = e.notification.data || '/';
+  var notifData = e.notification.data || {};
+  var isDM = typeof notifData === 'object' && notifData.type === 'dm';
+  var openUrl = isDM ? ('/?open-dm=' + encodeURIComponent(notifData.from || '')) : '/';
+
   e.waitUntil(
-    self.clients.matchAll({type: 'window'}).then(function(clients) {
+    self.clients.matchAll({type: 'window', includeUncontrolled: true}).then(function(clients) {
+      // App is already open — focus it and post a message to navigate to the chat
       for (var i = 0; i < clients.length; i++) {
         if (clients[i].url.indexOf('ironlog') !== -1) {
           clients[i].focus();
-          // Tell client to navigate to chat
-          if (typeof notifData === 'object' && notifData.type === 'dm') {
+          if (isDM && notifData.from) {
             clients[i].postMessage({type: 'OPEN_DM', from: notifData.from});
           }
           return;
         }
       }
-      return self.clients.openWindow('/');
+      // App is closed or backgrounded — open it with sender in URL so app picks it up on load
+      return self.clients.openWindow(openUrl);
     })
   );
 });
