@@ -11461,7 +11461,7 @@ function SocialFriends({s,d}){
         const msgs=(r.messages||[]).map(m=>({
           ...m,
           imageData:m.data?.imageData||m.imageData||null,
-          text:m.data?.imageData?"📷 Photo":(m.text||""),
+          text:(m.data?.imageData)?"📷 Photo":(m.text||""),
           read:m.isOwn&&lastFriendRead&&new Date(m.ts)<=new Date(lastFriendRead)
         }));
         setDmMessages(msgs);LS.set(`ft-dm-${friendEmail}`,msgs);
@@ -12179,7 +12179,7 @@ function IMConversation({s,email,displayName,friend,onBack}){
         const lastFriendRead=r.friendLastRead||null;
         const msgs=(r.messages||[]).map(m=>({
           ...m,imageData:m.data?.imageData||m.imageData||null,
-          text:m.data?.imageData?"📷 Photo":(m.text||""),
+          text:(m.data?.imageData)?"📷 Photo":(m.text||""),
           read:m.isOwn&&lastFriendRead&&new Date(m.ts)<=new Date(lastFriendRead)
         }));
         setMessages(msgs);LS.set(`ft-dm-${friend.email}`,msgs);
@@ -12218,7 +12218,7 @@ function IMConversation({s,email,displayName,friend,onBack}){
         const lastFriendRead=r.friendLastRead||null;
         const older=(r.messages||[]).map(m=>({...m,
           imageData:m.data?.imageData||m.imageData||null,
-          text:m.data?.imageData?"📷 Photo":(m.text||""),
+          text:(m.data?.imageData)?"📷 Photo":(m.text||""),
           read:m.isOwn&&lastFriendRead&&new Date(m.ts)<=new Date(lastFriendRead)}));
         setMessages(prev=>[...older,...prev]);
         setHasMore(!!r.hasMore);
@@ -12241,7 +12241,7 @@ function IMConversation({s,email,displayName,friend,onBack}){
         const lastFriendRead=r.friendLastRead||null;
         const incoming=(r.messages||[]).map(m=>({
           ...m,imageData:m.data?.imageData||m.imageData||null,
-          text:m.data?.imageData?"📷 Photo":(m.text||""),
+          text:(m.data?.imageData)?"📷 Photo":(m.text||""),
           read:m.isOwn&&lastFriendRead&&new Date(m.ts)<=new Date(lastFriendRead)
         }));
         // Only update if newest message is newer than what we have
@@ -13213,7 +13213,7 @@ function SocialProfile({s,d}){
           </div>
         <div style={{fontSize:18,fontWeight:800,color:V.text}}>{s.profile?.firstName||username}</div>
         {/* Rank badge */}
-        {(()=>{const {rank}=calcIronScore(s);return <div style={{marginBottom:4}}><RankBadge rank={rank} size="sm"/></div>;}())()}
+        {(()=>{const {rank}=calcIronScore(s);return <div style={{marginBottom:4}}><RankBadge rank={rank} size="sm"/></div>;})()}
         {!editingUn?(
           <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:4}}>
             <span style={{fontSize:11,color:V.text3}}>@{username}</span>
