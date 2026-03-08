@@ -48,6 +48,7 @@ input[type=number]{-moz-appearance:textfield}
   flex-direction:column;align-items:center;justify-content:center;gap:16px;font-family:'Outfit',sans-serif}
 @keyframes fadeInDown{from{opacity:0;transform:translateX(-50%) translateY(-10px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
 @keyframes checkinPulse{0%,100%{box-shadow:0 0 0 0 rgba(0,245,160,0.3)}50%{box-shadow:0 0 0 6px rgba(0,245,160,0)}}
+@keyframes slideUpSheet{from{transform:translateY(100%)}to{transform:translateY(0)}}
 </style>
 <script>try{var t=localStorage.getItem("ft-theme");if(t&&JSON.parse(t)==="light"){document.documentElement.style.background="#f5f5f7";}}catch(e){}</script>
 </head>
@@ -188,7 +189,7 @@ loadScript('https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.j
 
 <script type="text/plain" id="app-source">
 const {useState,useEffect,useReducer,useMemo,useRef,useCallback}=React;
-const {LineChart,Line,AreaChart,Area,BarChart,Bar,XAxis,YAxis,CartesianGrid,Tooltip,ResponsiveContainer,PieChart,Pie,Cell,ReferenceLine}=Recharts;
+const {LineChart,Line,AreaChart,Area,BarChart,Bar,XAxis,YAxis,CartesianGrid,Tooltip,ResponsiveContainer,PieChart,Pie,Cell,ReferenceLine,ReferenceDot}=Recharts;
 
 // ─── localStorage persistence ───
 const LS={
@@ -2543,6 +2544,19 @@ function usePRs(workouts,exercises){
   },[workouts,exercises]);
 }
 
+// ─── Nutrition streak (consecutive days with a log) ───
+function useNutritionStreak(nutrition){
+  return useMemo(()=>{
+    let c=0;
+    const base=(nutrition||[]).some(n=>n.date===today())?0:1;
+    for(let i=base;i<365;i++){
+      if((nutrition||[]).some(n=>n.date===ago(i)))c++;
+      else break;
+    }
+    return c;
+  },[nutrition]);
+}
+
 // ─── Find last sets for an exercise (for auto-fill) ───
 function findLastSets(exerciseId,workouts){
   for(const w of workouts){
@@ -3081,6 +3095,7 @@ function HomeTab({s,d}){
             background:"rgba(255,159,67,0.1)",border:"1px solid rgba(255,159,67,0.12)"}}>
             {Icons.flame({size:14,color:V.warn})}
             <span style={{fontSize:15,fontWeight:800,color:V.warn,fontFamily:V.mono}}>{streak}</span>
+            <HelpBtn topic="shields" color="#f59e0b"/>
             {(()=>{
               const shields=parseInt(LS.get("ft-streak-shields"))||0;
               if(shields<=0)return null;
@@ -3677,6 +3692,7 @@ function WorkoutTab({s,d}){
   const [editingId,setEditingId]=useState(null);
   const [expandedId,setExpandedId]=useState(null);
   const [shareWorkout,setShareWorkout]=useState(null);
+  const [histSearch,setHistSearch]=useState("");
   const cats=["All",...new Set(s.exercises.map(e=>e.cat))];
   const prs=usePRs(s.workouts,s.exercises);
 
@@ -4158,10 +4174,26 @@ function WorkoutTab({s,d}){
           )}
         </div>
       )}
-      {s.workouts.length===0?(
-        <div style={{textAlign:"center",padding:40,color:V.text3,fontSize:13}}>No workouts yet</div>
-      ):s.workouts.slice(0,showAll?999:15).map(w=>{
-        const vol=w.exercises.reduce((s2,e)=>s2+e.sets.reduce((ss,st)=>ss+(parseFloat(st.weight)||0)*(parseInt(st.reps)||0),0),0);
+      {s.workouts.length>3&&(
+        <div style={{position:"relative"}}>
+          <input value={histSearch} onChange={e=>setHistSearch(e.target.value)}
+            placeholder="Search by exercise..."
+            style={{width:"100%",padding:"8px 12px 8px 32px",background:"rgba(255,255,255,0.04)",
+              border:`1px solid ${V.cardBorder}`,borderRadius:10,color:V.text,fontSize:12,
+              outline:"none",fontFamily:V.font,boxSizing:"border-box"}}/>
+          <span style={{position:"absolute",left:10,top:"50%",transform:"translateY(-50%)",fontSize:12,opacity:0.4}}>🔍</span>
+          {histSearch&&<button onClick={()=>setHistSearch("")} style={{position:"absolute",right:8,top:"50%",
+            transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",fontSize:16,color:V.text3,padding:2}}>×</button>}
+        </div>
+      )}
+      {(()=>{
+        const filteredW=histSearch.trim()
+          ?s.workouts.filter(w=>w.exercises.some(ex=>(s.exercises.find(e=>e.id===ex.exerciseId)?.name||ex.exerciseId).toLowerCase().includes(histSearch.toLowerCase())))
+          :s.workouts;
+        return filteredW.length===0?(
+          <div style={{textAlign:"center",padding:40,color:V.text3,fontSize:13}}>{histSearch?"No workouts match that exercise":"No workouts yet"}</div>
+        ):filteredW.slice(0,showAll?999:15).map(w=>{
+        const vol=w.exercises.reduce((s2,e)=>s2+e.sets.filter(st=>!st.warmup).reduce((ss,st)=>ss+(parseFloat(st.weight)||0)*(parseInt(st.reps)||0),0),0);
         const expanded=expandedId===w.id;
         return(
           <Card key={w.id} onClick={()=>setExpandedId(expanded?null:w.id)} style={{padding:14,cursor:"pointer"}}>
@@ -4228,12 +4260,21 @@ function WorkoutTab({s,d}){
                     cursor:"pointer",fontSize:9,fontWeight:700,color:V.accent,fontFamily:V.font}}>
                   {shareWorkout===w.id?"Hide":"Share"} Card
                 </button>
+                <button onClick={e=>{e.stopPropagation();
+                  setForm({date:today(),dur:"",exercises:w.exercises.map(ex=>({...ex,sets:ex.sets.filter(st=>!st.warmup).map(st=>({...st,done:false}))})),notes:"",rating:3});
+                  setShow(true);setStartTime(Date.now());setElapsed(0);setEditingId(null);
+                  SuccessToastCtrl.show("Loaded — adjust and save");}}
+                  style={{padding:"4px 10px",borderRadius:6,background:"rgba(34,197,94,0.08)",border:"1px solid rgba(34,197,94,0.2)",
+                    cursor:"pointer",fontSize:9,fontWeight:700,color:"#22c55e",fontFamily:V.font}}>
+                  🔁 Do Again
+                </button>
               </div>
             )}
             {shareWorkout===w.id&&<div style={{marginTop:8}}><WorkoutCard workout={w} s={s}/></div>}
           </Card>
         );
-      })}
+      });
+      })()}
       {s.workouts.length>15&&!showAll&&(
         <button onClick={()=>setShowAll(true)} style={{width:"100%",padding:12,background:"rgba(255,255,255,0.02)",
           border:`1px solid ${V.cardBorder}`,borderRadius:10,cursor:"pointer",fontSize:11,color:V.accent,fontWeight:600,fontFamily:V.font}}>
@@ -4358,16 +4399,19 @@ function NutritionTab({s,d}){
       {/* Daily summary bar — enhanced */}
       <Card style={{padding:12}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-          <span style={{fontSize:11,fontWeight:700,color:V.text}}>Today</span>
-          {/* #3: Deficit/surplus indicator */}
-          {(()=>{
-            const tdee=parseInt(s.goals?.tdee)||0;
-            if(!tdee||!tCal)return <span style={{fontSize:10,color:V.text3}}>{tCal} / {calGoal} cal</span>;
-            const diff=tCal-tdee;
-            return <span style={{fontSize:10,color:diff>0?V.warn:V.accent,fontWeight:600}}>
-              {tCal} cal · {diff>0?"+":""}{diff} {diff>0?"surplus":"deficit"}
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <span style={{fontSize:11,fontWeight:700,color:V.text}}>Today</span>
+            {(()=>{const ns=useNutritionStreak(s.nutrition);return ns>0?<span style={{fontSize:9,fontWeight:700,padding:"1px 6px",borderRadius:4,background:"rgba(251,191,36,0.12)",color:"#fbbf24"}}>🥗 {ns}d streak</span>:null;})()}
+          </div>
+          {/* #3: Deficit/surplus indicator — vs TDEE if set, else vs goal */}
+          {tCal>0?(()=>{
+            const baseline=parseInt(s.goals?.tdee)||calGoal;
+            const lbl=parseInt(s.goals?.tdee)?"vs TDEE":"vs goal";
+            const diff=tCal-baseline;
+            return <span style={{fontSize:10,color:diff>100?V.warn:diff<-100?V.accent:V.text3,fontWeight:600}}>
+              {tCal} cal · {diff>0?"+":""}{diff} <span style={{opacity:0.5,fontWeight:400}}>({lbl})</span>
             </span>;
-          })()}
+          })():<span style={{fontSize:10,color:V.text3}}>0 / {calGoal} cal</span>}
         </div>
         <div style={{display:"flex",gap:8,marginBottom:6}}>
           <div style={{flex:1}}>
@@ -4748,6 +4792,16 @@ function NutritionTab({s,d}){
 // ═══════════════════════════════════════
 //  BODY TAB
 // ═══════════════════════════════════════
+// ─── Height string to meters ───
+function parseHeightToM(h){
+  if(!h)return null;
+  const hs=String(h).trim();
+  const cm=hs.match(/^([\d.]+)\s*cm$/i);if(cm)return parseFloat(cm[1])/100;
+  const fi=hs.match(/^(\d+)['\s](\d+)/);if(fi)return(parseInt(fi[1])*12+parseInt(fi[2]))*0.0254;
+  const ff=hs.match(/^(\d+)'?$/);if(ff)return parseInt(ff[1])*0.3048;
+  return null;
+}
+
 function BodyTab({s,d}){
   const [show,setShow]=useState(false);
   const emptyForm={date:today(),weight:"",bf:"",waist:"",hips:"",chest:"",neck:"",arms:"",thighs:"",calves:""};
@@ -4945,6 +4999,46 @@ function BodyTab({s,d}){
         </ResponsiveContainer>
       </Card>
 
+      {/* FFMI / BMI / Lean Mass */}
+      {(()=>{
+        const latest=(s.body||[]).find(b=>b.weight);
+        if(!latest?.weight||!latest?.bf)return null;
+        const hm=parseHeightToM(s.profile?.height);
+        if(!hm||hm<1)return null;
+        const wKg=s.units==="kg"?parseFloat(latest.weight):parseFloat(latest.weight)*0.453592;
+        const bf=parseFloat(latest.bf);
+        if(!wKg||!bf||!isFinite(wKg)||!isFinite(bf))return null;
+        const leanKg=wKg*(1-bf/100);
+        const ffmi=Math.round((leanKg/(hm*hm))*10)/10;
+        const bmi=Math.round((wKg/(hm*hm))*10)/10;
+        const leanDisp=s.units==="kg"?`${Math.round(leanKg*10)/10} kg`:`${Math.round(leanKg*2.205)} lbs`;
+        const ffmiRating=ffmi<18?"Below Avg":ffmi<20?"Average":ffmi<22?"Above Avg":ffmi<24?"Excellent":ffmi<26?"Elite":"World Class";
+        const ffmiColor=ffmi<18?V.text3:ffmi<20?V.warn:ffmi<22?V.accent2:ffmi<24?V.accent:ffmi<26?"#f59e0b":"#f43f5e";
+        const bmiNote=bmi<18.5?"Underweight":bmi<25?"Normal":bmi<30?"Overweight":"Obese";
+        return(
+          <Card style={{padding:14}}>
+            <div style={{fontSize:11,fontWeight:700,color:V.text3,marginBottom:10,textTransform:"uppercase",letterSpacing:".06em"}}>Body Composition</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:10}}>
+              {[
+                {label:"FFMI",value:ffmi,note:ffmiRating,color:ffmiColor},
+                {label:"BMI",value:bmi,note:bmiNote,color:V.text2},
+                {label:"Lean Mass",value:leanDisp,note:"fat-free",color:V.purple},
+              ].map(m=>(
+                <div key={m.label} style={{textAlign:"center",padding:"8px 4px",borderRadius:8,
+                  background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.06)"}}>
+                  <div style={{fontSize:9,color:V.text3,marginBottom:3,textTransform:"uppercase",letterSpacing:".06em"}}>{m.label}</div>
+                  <div style={{fontSize:m.label==="Lean Mass"?13:18,fontWeight:900,color:m.color,fontFamily:V.mono,lineHeight:1}}>{m.value}</div>
+                  <div style={{fontSize:8,color:m.color,marginTop:3,fontWeight:600}}>{m.note}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{padding:"7px 10px",borderRadius:8,background:`${ffmiColor}08`,border:`1px solid ${ffmiColor}18`,fontSize:10,color:V.text2,lineHeight:1.5}}>
+              FFMI measures muscle per height. Natural range 18–25 · Elite natural ~25. Requires body fat % to be logged.
+            </div>
+          </Card>
+        );
+      })()}
+
       {/* #19: Measurement comparison card — since Day 1 */}
       {s.body.length>=2&&(()=>{
         const first=s.body[s.body.length-1];const last=s.body[0];
@@ -5067,13 +5161,15 @@ function AnalyticsTab({s}){
   const [selEx,setSelEx]=useState("bench");
 
   const exProg=useMemo(()=>{
+    let runMax=0;
     return s.workouts.filter(w=>w.date>=ago(s.range)).sort((a,b)=>a.date.localeCompare(b.date)).reduce((arr,w)=>{
       const ex=w.exercises.find(e=>e.exerciseId===selEx);
       if(ex){
         const mw=Math.max(...ex.sets.map(st=>st.weight));
         const vol=ex.sets.reduce((s,st)=>s+(parseFloat(st.weight)||0)*(parseInt(st.reps)||0),0);
         const e1rm=Math.max(...ex.sets.map(st=>st.weight*(1+st.reps/30)));
-        arr.push({date:fmtShort(w.date),max:mw,vol,e1rm:Math.round(e1rm)});
+        const isPRPoint=mw>runMax;if(mw>runMax)runMax=mw;
+        arr.push({date:fmtShort(w.date),max:mw,vol,e1rm:Math.round(e1rm),isPR:isPRPoint});
       }
       return arr;
     },[]);
@@ -5123,6 +5219,11 @@ function AnalyticsTab({s}){
             <Tooltip {...chartCfg.tip}/>
             <Line type="monotone" dataKey="max" stroke={V.accent} strokeWidth={2} dot={{r:3}} name="Max"/>
             <Line type="monotone" dataKey="e1rm" stroke={V.purple} strokeWidth={2} strokeDasharray="5 5" dot={{r:2}} name="E1RM"/>
+            {exProg.filter(p=>p.isPR).map((p,i)=>(
+              <ReferenceDot key={i} x={p.date} y={p.max} r={6}
+                fill="#f59e0b" stroke={V.bg} strokeWidth={2}
+                label={{value:"PR",position:"top",fill:"#f59e0b",fontSize:8,fontWeight:800}}/>
+            ))}
           </LineChart>
         </ResponsiveContainer>
       </Card>
@@ -10115,14 +10216,54 @@ function AdaptiveCoach({s}){
   },[s.workouts,s.exercises,s.schedule,todayType,r.score,r.rec]);
 
   if(program.type==="rest"){
+    const RECOVERY=[
+      {name:"Hip Flexor Stretch",sets:"2×45s each side",note:"Lunge, rear knee down, lean forward",icon:"🦵"},
+      {name:"Thoracic Rotation",sets:"2×10 each side",note:"Rotate upper back slowly",icon:"🔄"},
+      {name:"Foam Roll — Quads & IT Band",sets:"2min each leg",note:"Slow passes, pause on tight spots",icon:"🧘"},
+      {name:"Cat-Cow Stretch",sets:"2×10 reps",note:"All fours, full spinal flexion and extension",icon:"🐈"},
+      {name:"90/90 Hip Stretch",sets:"2×60s each side",note:"Front and rear hip flexors simultaneously",icon:"💺"},
+      {name:"Dead Hang",sets:"3×30s",note:"Full spinal decompression — shoulders packed",icon:"🏋️"},
+    ];
     return(
       <div style={{display:"flex",flexDirection:"column",gap:12}}>
-        <div style={{fontSize:16,fontWeight:800,color:V.text}}>Today's Program</div>
-        <Card style={{padding:20,textAlign:"center"}}>
-          <div style={{fontSize:28,marginBottom:8}}>🧘</div>
-          <div style={{fontSize:14,fontWeight:700,color:V.text,marginBottom:4}}>Recovery Day</div>
-          <div style={{fontSize:12,color:V.text3,lineHeight:1.5}}>{program.message}</div>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div style={{fontSize:16,fontWeight:800,color:V.text}}>Today's Program</div>
+          <span style={{fontSize:9,fontWeight:700,padding:"3px 8px",borderRadius:6,background:"rgba(139,92,246,0.1)",color:V.purple}}>🧘 Recovery</span>
+        </div>
+        <Card style={{padding:14,background:"rgba(139,92,246,0.04)",border:"1px solid rgba(139,92,246,0.15)"}}>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
+            <span style={{fontSize:24}}>🧘</span>
+            <div>
+              <div style={{fontSize:14,fontWeight:700,color:V.text}}>Recovery Day</div>
+              <div style={{fontSize:11,color:V.text3}}>Active recovery keeps you loose and speeds adaptation</div>
+            </div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6}}>
+            {[{l:"Mobility",v:"~20 min",c:V.purple},{l:"Intensity",v:"Low",c:V.accent2},{l:"Workout XP",v:"+0",c:V.text3}].map(st=>(
+              <div key={st.l} style={{textAlign:"center",padding:"6px 4px",borderRadius:6,background:"rgba(255,255,255,0.03)"}}>
+                <div style={{fontSize:13,fontWeight:800,color:st.c,fontFamily:V.mono}}>{st.v}</div>
+                <div style={{fontSize:8,color:V.text3}}>{st.l}</div>
+              </div>
+            ))}
+          </div>
         </Card>
+        <div style={{fontSize:11,fontWeight:700,color:V.text3,textTransform:"uppercase",letterSpacing:".08em",paddingLeft:2}}>Recovery Circuit</div>
+        {RECOVERY.map((ex,i)=>(
+          <Card key={i} style={{padding:12}}>
+            <div style={{display:"flex",alignItems:"center",gap:10}}>
+              <div style={{width:34,height:34,borderRadius:10,background:"rgba(139,92,246,0.1)",
+                display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>{ex.icon}</div>
+              <div style={{flex:1}}>
+                <div style={{fontSize:13,fontWeight:700,color:V.text}}>{ex.name}</div>
+                <div style={{fontSize:11,color:V.purple,fontWeight:600}}>{ex.sets}</div>
+                <div style={{fontSize:10,color:V.text3,marginTop:2}}>{ex.note}</div>
+              </div>
+            </div>
+          </Card>
+        ))}
+        <div style={{padding:"10px 14px",borderRadius:10,background:"rgba(0,245,160,0.04)",border:"1px solid rgba(0,245,160,0.1)",fontSize:11,color:V.text3,lineHeight:1.6}}>
+          💡 <strong style={{color:V.accent}}>Tomorrow:</strong> {program.message} Prioritize sleep and hydration today.
+        </div>
       </div>
     );
   }
@@ -11532,10 +11673,12 @@ function PersonalRecords({s}){
                 <div style={{display:"flex",gap:6,alignItems:"center",marginTop:2}}>
                   <div style={{fontSize:10,color:V.text3}}>{pr.cat} · {fmtShort(pr.date)}</div>
                   {(()=>{const days=Math.round((Date.now()-new Date(pr.date+"T12:00:00"))/86400000);
-                    const hot=days<=14;
+                    const hot=days<=14;const cold=days>=180;
                     return <span style={{fontSize:8,fontWeight:700,padding:"1px 5px",borderRadius:4,
-                      background:hot?"rgba(34,197,94,0.12)":"rgba(255,255,255,0.04)",
-                      color:hot?"#22c55e":V.text3}}>{hot?"🔥 Recent":days<90?`${days}d ago`:`${Math.floor(days/30)}mo ago`}</span>;
+                      background:hot?"rgba(34,197,94,0.12)":cold?"rgba(56,189,248,0.1)":"rgba(255,255,255,0.04)",
+                      color:hot?"#22c55e":cold?"#38bdf8":V.text3}}>
+                      {hot?"🔥 Recent":cold?"🧊 Cold":days<90?`${days}d ago`:`${Math.floor(days/30)}mo ago`}
+                    </span>;
                   })()}
                 </div>
               </div>
@@ -13463,12 +13606,19 @@ function SocialGroups({s,d}){
       </div>
 
       {/* LEADERBOARD TAB */}
-      {groupTab==="board"&&(<>
+      {groupTab==="board"&&(()=>{
+        const [lbMetric,setLbMetric]=useState("streak");
+        const LB_METRICS=[{id:"streak",label:"Streak",icon:"🔥",cid:"streak",fmt:(v)=>`${v}d`},{id:"ironscore",label:"XP",icon:"⚡",cid:"ironscore",fmt:(v)=>v>=1000?`${(v/1000).toFixed(1)}k`:String(v)},{id:"big3",label:"Big 3",icon:"🏋️",cid:"big3",fmt:(v)=>`${v}lb`}];
+        const getV=(m2,cid)=>parseInt(m2.challenges?.find(c3=>c3.challenge_id===cid)?.value||0);
+        const curM=LB_METRICS.find(m2=>m2.id===lbMetric)||LB_METRICS[0];
+        const sortedM=[...(members?.members||[])].sort((a,b)=>getV(b,curM.cid)-getV(a,curM.cid));
+        const topV=Math.max(1,...sortedM.map(m2=>getV(m2,curM.cid)));
+        return(<>
         <Card style={{padding:14}}>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:10}}>
             {[{l:"MEMBERS",v:members?.members?.length||0,c:V.accent},
-              {l:"TOTAL STREAK",v:members?.members?.reduce((a,m)=>{const sv=m.challenges?.find(c2=>c2.challenge_id==="streak");return a+(sv?parseInt(sv.value):0);},0)||0,c:V.warn},
-              {l:"TOP STREAK",v:Math.max(0,...(members?.members||[]).map(m=>parseInt(m.challenges?.find(c2=>c2.challenge_id==="streak")?.value||0))),c:V.purple}
+              {l:"AVG STREAK",v:Math.round((members?.members||[]).reduce((a,m2)=>a+getV(m2,"streak"),0)/Math.max(1,(members?.members||[]).length))+"d",c:V.warn},
+              {l:"TOP STREAK",v:Math.max(0,...(members?.members||[]).map(m2=>getV(m2,"streak")))+"d",c:V.purple}
             ].map((st,i)=>(
               <div key={i} style={{textAlign:"center",padding:6,borderRadius:6,background:"rgba(255,255,255,0.02)"}}>
                 <div style={{fontSize:16,fontWeight:800,color:st.c,fontFamily:V.mono}}>{st.v}</div>
@@ -13476,30 +13626,42 @@ function SocialGroups({s,d}){
               </div>
             ))}
           </div>
-        </Card>
-        <Card style={{padding:14}}>
-          <div style={{fontSize:12,fontWeight:700,color:V.text,marginBottom:8}}>Leaderboard</div>
-          {(members?.members||[]).sort((a,b)=>{
-            const a2=parseInt(a.challenges?.find(c2=>c2.challenge_id==="streak")?.value||0);
-            const b2=parseInt(b.challenges?.find(c2=>c2.challenge_id==="streak")?.value||0);return b2-a2;
-          }).map((m,i)=>(
-            <div key={i} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 0",
-              borderBottom:i<(members?.members?.length||0)-1?"1px solid rgba(255,255,255,0.03)":"none"}}>
-              <div style={{width:24,height:24,borderRadius:8,
-                background:i===0?V.accent:i===1?V.purple:i===2?V.warn:"rgba(255,255,255,0.06)",
-                display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:800,color:i<3?V.bg:V.text3,flexShrink:0}}>{i+1}</div>
-              <div style={{flex:1}}>
-                <div style={{fontSize:12,fontWeight:600,color:m.user_email===email?V.accent:V.text}}>{m.name}{m.user_email===email?" (you)":""}</div>
+          <div style={{display:"flex",gap:4,marginBottom:12}}>
+            {LB_METRICS.map(m2=>(
+              <button key={m2.id} onClick={()=>setLbMetric(m2.id)} style={{flex:1,padding:"6px 4px",borderRadius:7,
+                border:`1.5px solid ${lbMetric===m2.id?V.accent:V.cardBorder}`,
+                background:lbMetric===m2.id?`${V.accent}10`:"transparent",cursor:"pointer",
+                fontSize:9,fontWeight:700,color:lbMetric===m2.id?V.accent:V.text3,fontFamily:V.font}}>
+                {m2.icon} {m2.label}
+              </button>
+            ))}
+          </div>
+          {sortedM.map((m,i)=>{
+            const val=getV(m,curM.cid);
+            const barPct=Math.round(val/topV*100);
+            const medal=i===0?"🥇":i===1?"🥈":i===2?"🥉":String(i+1);
+            return(
+              <div key={i} style={{marginBottom:i<sortedM.length-1?8:0}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:3}}>
+                  <div style={{width:22,height:22,borderRadius:6,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",
+                    fontSize:i<3?14:9,fontWeight:800,color:V.text3}}>{medal}</div>
+                  <div style={{flex:1,fontSize:12,fontWeight:600,color:m.user_email===email?V.accent:V.text,
+                    overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                    {m.name}{m.user_email===email?" (you)":""}
+                  </div>
+                  <div style={{fontSize:12,fontWeight:800,color:i===0?"#f59e0b":V.text,fontFamily:V.mono,flexShrink:0}}>
+                    {curM.fmt(val)}
+                  </div>
+                </div>
+                <div style={{height:3,borderRadius:2,background:"rgba(255,255,255,0.05)",marginLeft:30}}>
+                  <div style={{height:"100%",borderRadius:2,background:i===0?"#f59e0b":V.accent,width:`${barPct}%`,transition:"width .4s"}}/>
+                </div>
               </div>
-              <div style={{textAlign:"right"}}>
-                {m.challenges?.map((c2,j)=>(
-                  <div key={j} style={{fontSize:9,color:V.text3}}>{c2.challenge_id}: <span style={{color:V.accent,fontWeight:700}}>{c2.value}</span></div>
-                ))}
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </Card>
-      </>)}
+        </>);
+      })()}
 
       {/* CHALLENGES TAB */}
       {groupTab==="challenges"&&(<>
@@ -14625,7 +14787,7 @@ function SocialChallenges({s,d}){
 
   return(
     <div style={{display:"flex",flexDirection:"column",gap:10}}>
-      <div style={{fontSize:16,fontWeight:800,color:V.text}}>Challenges</div>
+      <div style={{display:"flex",alignItems:"center",gap:6}}><span style={{fontSize:16,fontWeight:800,color:V.text}}>Challenges</span><HelpBtn topic="challenges" color="#a78bfa"/></div>
       {[
         {name:"Workout Streak",desc:"Consecutive days with a logged workout",emoji:"🔥",val:streak,tiers:streakTiers,nextTier:streakTiers.find(t=>t.v>streak),unit:" days"},
         {name:"Big 3 Total",desc:"Best Bench + Squat + Deadlift",emoji:"🏋️",val:big3,tiers:liftTiers,nextTier:liftTiers.find(t=>t.v>big3),unit:` ${wUnit(s.units)}`},
@@ -14819,6 +14981,8 @@ function calcIronScore(s){
   baseXP += Object.values(checks).filter(Boolean).length*75;
   // Streak milestones
   if(streak>=7)baseXP+=150;if(streak>=14)baseXP+=300;if(streak>=30)baseXP+=750;if(streak>=60)baseXP+=1500;if(streak>=100)baseXP+=3000;
+  const nutStreak2=(()=>{let c=0;const b2=(s.nutrition||[]).some(n=>n.date===today())?0:1;for(let i=b2;i<365;i++){if((s.nutrition||[]).some(n=>n.date===ago(i)))c++;else break;}return c;})();
+  if(nutStreak2>=7)baseXP+=100;if(nutStreak2>=14)baseXP+=200;if(nutStreak2>=30)baseXP+=500;
   // Strength milestones
   if(big3>=500)baseXP+=200;if(big3>=800)baseXP+=400;if(big3>=1000)baseXP+=600;if(big3>=1200)baseXP+=1000;if(big3>=1500)baseXP+=2000;
   // Consistency bonuses
@@ -14999,6 +15163,181 @@ function LevelUpCelebration({rank,onDismiss,s}){
   );
 }
 
+
+// ═══════════════════════════════════════════════════════
+// IRONLOG HELP SYSTEM
+// HelpBtn — the ? button used throughout the app
+// HelpModal — full-screen topic sheet
+// HELP_TOPICS — all tutorial content in one place
+// ═══════════════════════════════════════════════════════
+
+const HELP_TOPICS={
+  shields:{
+    title:"🛡️ Streak Shields",
+    color:"#38bdf8",
+    summary:"Shields protect your streak when life gets in the way — completely automatically.",
+    sections:[
+      {icon:"🏆",title:"How you earn them",body:"You earn 1 shield every time your streak hits a multiple of 7 — at day 7, 14, 21, 28, and so on. The shield appears automatically, no action needed. You can hold a maximum of 3 at once, so earning more doesn't add a 4th."},
+      {icon:"⚡",title:"How they activate",body:"100% automatic. If you miss a day and your last workout was exactly 1 day ago, a shield activates the moment you open the app — you don't tap anything. You'll see a blue banner saying your streak is protected. The shield is then consumed."},
+      {icon:"📋",title:"The critical rule — 1-day gaps only",body:"Shields only cover a gap of exactly 1 missed day. Miss Monday → shield fires, Tuesday's gap is covered. But if you also miss Tuesday, the gap is now 2 days and your streak breaks — no shield can fix that. One miss = covered. Two in a row = gone."},
+      {icon:"🛡️",title:"Where to see your shields",body:"Your shield count shows as 🛡️ next to your streak flame on the home screen and inside your Iron Score card. Tap ? next to your streak to open this guide. The '3d to 🛡️' countdown shows days until your next shield is earned."},
+      {icon:"💡",title:"Strategy",body:"Hit a 7-day streak as fast as possible to bank your first shield before life interrupts. At 21 days you'll have a full 3-shield buffer — enough to cover a long weekend without losing everything you've built."},
+    ]
+  },
+  xp:{
+    title:"⚡ XP & Iron Ranks",
+    color:"#f59e0b",
+    summary:"Every action earns XP. XP determines your rank. Ranks are permanent.",
+    sections:[
+      {icon:"💪",title:"Daily XP sources",body:"Workout logged: +30 XP. Each PR hit: +20 XP. Consistency bonus (3+ sessions on the same lift in 14 days): +10 XP per lift. Nutrition log: +8 XP. Progress photo: +15 XP. Check-in: +5 XP. Daily missions: +20–50 XP each."},
+      {icon:"🏆",title:"Milestone XP — the big jumps",body:"These bonus XP awards fire once when you hit each threshold and are included in your Iron Score permanently. Streak milestones: 7d +150, 14d +300, 30d +750, 60d +1500, 100d +3000. Big 3 strength: 500lb +200, 800lb +400, 1000lb +600, 1200lb +1000, 1500lb +2000. Monthly consistency: 16 workouts/month +500, 20+ workouts +1000."},
+      {icon:"🏅",title:"The 30 ranks",body:"There are 30 ranks across 4 tiers — Iron, Steel, Titanium, and Diamond. Each has a unique name, icon, and XP threshold. You level up the moment your score crosses the line — no tests, no waiting. You can never lose a rank once earned."},
+      {icon:"🔥",title:"XP multipliers",body:"Only one multiplier applies per session — the highest one available. Priority order: 3× Comeback (5+ days off, one-time) → 2× Double XP day (every Tue/Thu) → 1.5× 3-Day Combo (3 consecutive training days). Tap the Multipliers ? for details."},
+      {icon:"🛡️",title:"Shields don't affect XP",body:"A shield covering a missed day protects your streak counter but not your XP. You earned 0 XP that day — the shield just keeps your flame alive. The only way to earn XP is to train."},
+    ]
+  },
+  multipliers:{
+    title:"🔥 XP Multipliers",
+    color:"#f97316",
+    summary:"One multiplier applies per session — the highest one wins.",
+    sections:[
+      {icon:"📋",title:"How multipliers work",body:"Only one multiplier can be active at a time. They don't stack. The app checks them in priority order — Comeback first, then Double XP day, then 3-Day Combo — and applies whichever one qualifies first. The active multiplier shows as a banner at the top of your Iron Score card."},
+      {icon:"💥",title:"3× Comeback Bonus — highest priority",body:"If you haven't trained in 5 or more days, your very next workout earns 3× XP. It fires once and then expires — the banner disappears after you log. Perfect after travel, illness, or a rough week. Because it's highest priority, it beats Double XP day even if today is Tuesday or Thursday."},
+      {icon:"⚡",title:"2× Double XP — Tuesdays & Thursdays",body:"Every Tuesday and Thursday your workout XP is doubled automatically. Base XP, PR bonuses, and consistency bonuses all double. No setup needed — just train. This is the most reliable multiplier to plan around; use these days for your hardest sessions."},
+      {icon:"🔄",title:"1.5× 3-Day Combo — lowest priority",body:"Train 3 calendar days in a row (today, yesterday, and the day before) and a 1.5× combo bonus activates. It only applies if Comeback and Double XP day are both inactive. A solid reward for consistent mid-week training."},
+      {icon:"💡",title:"Best strategy",body:"The highest single-session XP is a 3× Comeback return — so if you've been away 5+ days, come back on any day and you'll get 3× regardless. For ongoing max XP, Tuesday and Thursday double XP days are your most reliable tool."},
+    ]
+  },
+  missions:{
+    title:"🎯 Daily Missions",
+    color:"#22c55e",
+    summary:"Three daily challenges that reset at midnight. Complete them for bonus XP.",
+    sections:[
+      {icon:"📅",title:"How they work",body:"Every day at midnight, 3 missions are assigned. Complete them for bonus XP on top of whatever you earn from the activity itself. Missions don't carry over — anything incomplete disappears at midnight and a new set loads."},
+      {icon:"🏅",title:"Mission types",body:"Workout: log any session (+25 XP), hit a PR (+50 XP), train before 8am — Early Bird (+45 XP). Nutrition: log a full day (+25 XP), hit your daily protein target (+30 XP). Social: send a DM to a friend (+20 XP). Habit: complete a check-in (+20 XP), log a rest day (+20 XP)."},
+      {icon:"⚡",title:"XP and completion",body:"Each mission awards its XP when you complete the action — you don't need to tap anything inside the missions card itself. Completed missions show a green checkmark. Finishing all 3 in a day maximises your bonus XP for that day."},
+      {icon:"🎯",title:"Finding and navigating",body:"Missions appear on the Home tab and the Social Feed. Tap any mission card to jump directly to the relevant section — so tapping the workout mission takes you straight to the log screen. Completed missions stay visible until midnight so you can track your daily sweep."},
+    ]
+  },
+  duels:{
+    title:"⚔️ 1v1 Duels",
+    color:"#f43f5e",
+    summary:"Challenge a friend to a head-to-head competition over a set timeframe.",
+    sections:[
+      {icon:"⚡",title:"Starting a duel",body:"Social → 1v1 Duels → + New Challenge. Pick a friend from your friend list, choose your metric (workouts, volume, streak, protein days, or Big 3 total), and choose a duration (3, 7, or 14 days). The duel starts the moment you confirm."},
+      {icon:"📊",title:"How scoring works",body:"Progress metrics (workouts logged, volume lifted, protein days hit) count only activities after the duel started — your history before the challenge doesn't count. Standing metrics (current streak, Big 3 max) compare your current values at the end of the period."},
+      {icon:"🏆",title:"Claiming results",body:"When the time runs out, the duel moves to Pending Results. Tap Claim to lock in the final scores — the winner is determined at that moment. After claiming, results are permanent and your W/L/T record updates immediately."},
+      {icon:"🔄",title:"Rematch and history",body:"After any settled duel you can tap Rematch to instantly start a new duel with the same friend and metric. Tap the History tab to see all past results. Your W/L/T record is shown at the top of the Duels screen."},
+      {icon:"👑",title:"Duel King badge",body:"Earn the 👑 Duel King badge at 5 wins. Your W/L/T record and Duel Wins count appear on the Social Leaderboard under the Duels tab, so your friends can see where you rank across the community."},
+    ]
+  },
+  war:{
+    title:"⚔️ Weekly Wars",
+    color:"#fbbf24",
+    summary:"A fresh set of challenges every Monday. Hit the target before Sunday to win.",
+    sections:[
+      {icon:"📅",title:"How wars work",body:"Every Monday morning, the current week's war activates. There are always 3 active challenges rotating each week — hitting the primary goal (the first one shown) is what counts as a War Win. The others are bonus objectives. Everything resets Monday."},
+      {icon:"🏆",title:"Claiming your win",body:"When you hit the weekly target, a Claim Victory button appears. Tap it to lock in your win — it's not automatic. Claiming awards +100 XP and adds to your War Win streak. You can only claim once per week."},
+      {icon:"🔥",title:"War Win streak",body:"Win the war in consecutive weeks to build a streak. Win this week and last week = a 2-week war streak. Miss a week and it resets to 0. Your all-time war wins and current streak are shown on your profile and tracked permanently."},
+      {icon:"⚡",title:"Challenge types",body:"Wars rotate through: Most Workouts (e.g. 4 in a week), Volume Target (e.g. 10,000 lbs lifted), Protein Consistency (e.g. 4 protein days), Streak Hold (maintain your streak all week), and The Gauntlet — see below."},
+      {icon:"💡",title:"The Gauntlet",body:"The hardest weekly challenge: complete 3 workouts + 4 protein days + hit at least 1 new PR, all within the same week. Each component is tracked independently on the wars screen. All 3 must be done to claim the Gauntlet win."},
+    ]
+  },
+  challenges:{
+    title:"🏆 Challenges & Badges",
+    color:"#a78bfa",
+    summary:"Permanent milestones that show up on your profile and sync to friends.",
+    sections:[
+      {icon:"🔥",title:"Streak challenge",body:"Consecutive days with a logged workout. Tiers: 🥉 Bronze = 7 days, 🥈 Silver = 14 days, 🥇 Gold = 21 days, 💎 Diamond = 30 days. Your current streak is compared live — hit the next tier and it updates immediately."},
+      {icon:"🏋️",title:"Big 3 Total challenge",body:"Your best Bench + Squat + Deadlift single-rep maxes combined. Tiers: 🥉 Bronze = 600 lbs, 🥈 Silver = 800 lbs, 🥇 Gold = 1,000 lbs, 💎 Diamond = 1,200 lbs. Your all-time bests are used, not a single session."},
+      {icon:"🥗",title:"Macro Master challenge",body:"Days in the last 7 where you hit your protein goal. Tiers: 🥉 Bronze = 3 days, 🥈 Silver = 5 days, 🥇 Gold = 7 days (a perfect protein week). Note: this challenge has 3 tiers, not 4 — there is no Diamond tier."},
+      {icon:"🏅",title:"Badges",body:"Badges are one-time achievements displayed on your profile: 💯 Century Club (100 workouts logged), 🏋️ 1000lb Club (Big 3 ≥ 1000 lbs), 💎 Diamond Streak (30-day streak), 🔥 On Fire (7-day streak), 🥗 Macro Master (7 protein days in a week)."},
+      {icon:"👥",title:"Friends can see everything",body:"Your challenge tiers and badges sync to the server each time you log a workout. Friends see your tiers on the Social Leaderboard and your full badge collection on your profile. Tiers are permanent — they never go backwards."},
+    ]
+  },
+  ironscore:{
+    title:"🏋️ Iron Score Explained",
+    color:"#00f5a0",
+    summary:"Your all-time XP total. It only goes up. It determines your rank.",
+    sections:[
+      {icon:"📊",title:"What Iron Score is",body:"Every XP point you've ever earned — from workouts, nutrition logs, PRs, check-ins, photos, missions, milestones, and multiplier bonuses — adds to your Iron Score permanently. Deleting a workout doesn't reduce it. It's a one-way counter of your effort."},
+      {icon:"🏆",title:"How ranks work",body:"Your rank updates the instant your Iron Score crosses a threshold. 30 ranks across 4 tiers (Iron → Steel → Titanium → Diamond). You can never lose a rank. The rank icon next to your name on the leaderboard reflects where you are right now."},
+      {icon:"🔢",title:"XP breakdown — daily activities",body:"Workout: +30 XP. Each PR: +20 XP. Consistency bonus per lift (3+ times in 14 days): +10 XP. Nutrition log: +8 XP. Progress photo: +15 XP. Check-in: +5 XP. Missions: +20–50 XP each. Weekly War win: +100 XP."},
+      {icon:"⭐",title:"XP breakdown — milestones (the big ones)",body:"These fire once when you hit each threshold. Streak: 7d +150, 14d +300, 30d +750, 60d +1500, 100d +3000. Big 3 strength: 500lb +200, 800lb +400, 1000lb +600, 1200lb +1000, 1500lb +2000. Monthly consistency: 16 workouts +500, 20 workouts +1000. Badges earned: +75 XP each."},
+      {icon:"📱",title:"Syncs across devices",body:"Your Iron Score lives on the server. Every time you log anything, it syncs. Sign into a new phone using your account PIN and your full score history is restored. The leaderboard in Social → Leaderboard ranks you against friends and group members in real time."},
+    ]
+  },
+};
+
+// ─── HelpBtn — small ? button for section headers ───
+function HelpBtn({topic,color}){
+  const [open,setOpen]=useState(false);
+  return(
+    <>
+      <button onClick={e=>{e.stopPropagation();setOpen(true);}}
+        style={{width:18,height:18,borderRadius:"50%",border:`1px solid ${color||V.text3}40`,
+          background:`${color||V.text3}10`,cursor:"pointer",display:"flex",alignItems:"center",
+          justifyContent:"center",fontSize:9,fontWeight:800,color:color||V.text3,
+          fontFamily:V.font,padding:0,flexShrink:0,WebkitTapHighlightColor:"transparent",
+          lineHeight:1}}>?</button>
+      {open&&<HelpModal topic={topic} onClose={()=>setOpen(false)}/>}
+    </>
+  );
+}
+
+// ─── HelpModal — slide-up sheet with full tutorial ───
+function HelpModal({topic,onClose}){
+  const t=HELP_TOPICS[topic];
+  if(!t)return null;
+  return(
+    <div style={{position:"fixed",inset:0,zIndex:9999,display:"flex",flexDirection:"column",justifyContent:"flex-end"}}
+      onClick={onClose}>
+      <div style={{position:"absolute",inset:0,background:"rgba(0,0,0,0.7)",backdropFilter:"blur(4px)"}}/>
+      <div onClick={e=>e.stopPropagation()}
+        style={{position:"relative",zIndex:1,background:V.card,
+          borderRadius:"20px 20px 0 0",border:`1px solid ${V.cardBorder}`,
+          borderBottom:"none",maxHeight:"88vh",display:"flex",flexDirection:"column",
+          animation:"slideUpSheet .25s ease-out"}}>
+        {/* Header */}
+        <div style={{padding:"16px 20px 12px",borderBottom:`1px solid ${V.cardBorder}`,flexShrink:0}}>
+          <div style={{width:36,height:4,borderRadius:2,background:"rgba(255,255,255,0.15)",
+            margin:"0 auto 14px"}}/>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+            <div style={{flex:1}}>
+              <div style={{fontSize:20,fontWeight:900,color:t.color,lineHeight:1.1,marginBottom:4}}>
+                {t.title}
+              </div>
+              <div style={{fontSize:12,color:V.text3,lineHeight:1.5}}>{t.summary}</div>
+            </div>
+            <button onClick={onClose}
+              style={{width:28,height:28,borderRadius:8,border:`1px solid ${V.cardBorder}`,
+                background:"rgba(255,255,255,0.06)",cursor:"pointer",flexShrink:0,marginLeft:12,
+                display:"flex",alignItems:"center",justifyContent:"center",
+                fontSize:14,color:V.text3,fontFamily:V.font}}>✕</button>
+          </div>
+        </div>
+        {/* Scrollable content */}
+        <div style={{overflowY:"auto",padding:"14px 20px 32px",WebkitOverflowScrolling:"touch"}}>
+          {t.sections.map((sec,i)=>(
+            <div key={i} style={{marginBottom:i<t.sections.length-1?14:0}}>
+              <div style={{display:"flex",gap:12,padding:"12px 14px",borderRadius:12,
+                background:`${t.color}08`,border:`1px solid ${t.color}18`}}>
+                <span style={{fontSize:22,flexShrink:0,lineHeight:1.3}}>{sec.icon}</span>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:13,fontWeight:800,color:t.color,marginBottom:5,lineHeight:1.2}}>
+                    {sec.title}
+                  </div>
+                  <div style={{fontSize:12,color:V.text2,lineHeight:1.6}}>{sec.body}</div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── IronScoreCard (replaces old version) ──
 function IronScoreCard({s,compact,showShields}){
   const {xp,rank,nextRank,xpIntoRank,xpForNext,pct,streak}=useMemo(()=>calcIronScore(s),[s.workouts,s.nutrition,s.photos,s.checkins,s.body]);
@@ -15038,6 +15377,7 @@ function IronScoreCard({s,compact,showShields}){
           background:`${multiplier.color}15`,border:`1px solid ${multiplier.color}30`,marginBottom:10}}>
           <span style={{fontSize:14}}>{multiplier.icon}</span>
           <span style={{fontSize:11,fontWeight:800,color:multiplier.color}}>{multiplier.label} active!</span>
+          <HelpBtn topic="multipliers" color={multiplier.color}/>
           <span style={{fontSize:9,color:V.text3,marginLeft:"auto"}}>
             {multiplier.mult===3?"Expires after 1 workout":"All day"}
           </span>
@@ -15061,7 +15401,7 @@ function IronScoreCard({s,compact,showShields}){
         </div>
         <div style={{textAlign:"right"}}>
           <div style={{fontSize:26,fontWeight:900,color:V.text,fontFamily:V.mono,lineHeight:1}}>{xp.toLocaleString()}</div>
-          <div style={{fontSize:9,color:V.text3}}>IRON XP</div>
+          <div style={{display:"flex",alignItems:"center",gap:4}}><span style={{fontSize:9,color:V.text3}}>IRON XP</span><HelpBtn topic="ironscore" color={rank.color}/></div>
         </div>
       </div>
       {/* Shields + streak + next milestone */}
@@ -15073,6 +15413,7 @@ function IronScoreCard({s,compact,showShields}){
             <span style={{fontSize:11,fontWeight:700,color:"#38bdf8"}}>
               {shields} Shield{shields!==1?"s":""}
             </span>
+            <HelpBtn topic="shields" color="#38bdf8"/>
           </div>
         )}
         {streak>0&&(
@@ -15419,7 +15760,7 @@ function DailyMissionsCard({s,d,compact}){
       background:allDone?"rgba(34,197,94,0.04)":"rgba(99,102,241,0.03)"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
         <div>
-          <div style={{fontSize:13,fontWeight:800,color:V.text}}>🎯 Daily Missions</div>
+          <div style={{display:"flex",alignItems:"center",gap:6}}><span style={{fontSize:13,fontWeight:800,color:V.text}}>🎯 Daily Missions</span><HelpBtn topic="missions" color="#22c55e"/></div>
           <div style={{fontSize:10,color:V.text3}}>Resets in {hoursLeft}h · Complete all 3 for +30 bonus XP</div>
         </div>
         <div style={{textAlign:"right"}}>
@@ -15614,7 +15955,7 @@ function SocialIronScore({s,d}){
 
   return(
     <div style={{display:"flex",flexDirection:"column",gap:12}}>
-      <div style={{fontSize:16,fontWeight:800,color:V.text}}>Iron Score</div>
+      <div style={{display:"flex",alignItems:"center",gap:6}}><span style={{fontSize:16,fontWeight:800,color:V.text}}>Iron Score</span><HelpBtn topic="ironscore" color="#00f5a0"/></div>
 
       <IronScoreCard s={s} showShields/>
 
@@ -15934,7 +16275,7 @@ function SocialDuels({s,d}){
       {/* ── Header ── */}
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
         <div>
-          <div style={{fontSize:16,fontWeight:800,color:V.text}}>⚔️ 1v1 Duels</div>
+          <div style={{display:"flex",alignItems:"center",gap:6}}><span style={{fontSize:16,fontWeight:800,color:V.text}}>⚔️ 1v1 Duels</span><HelpBtn topic="duels" color="#f43f5e"/></div>
           <div style={{fontSize:11,color:V.text3}}>Challenge a friend head-to-head</div>
         </div>
         <button onClick={()=>{setRematchFriend(null);setSelFriend(null);setShowNew(true);}}
@@ -16436,7 +16777,7 @@ function SocialWeeklyWar({s,d}){
     <div style={{display:"flex",flexDirection:"column",gap:10}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
         <div>
-          <div style={{fontSize:16,fontWeight:800,color:V.text}}>Weekly Wars</div>
+          <div style={{display:"flex",alignItems:"center",gap:6}}><span style={{fontSize:16,fontWeight:800,color:V.text}}>Weekly Wars</span><HelpBtn topic="war" color="#fbbf24"/></div>
           <div style={{fontSize:11,color:V.text3}}>New battles every Monday · {daysLeft}d remaining</div>
         </div>
         <div style={{textAlign:"right"}}>
