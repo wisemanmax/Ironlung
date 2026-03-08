@@ -47,6 +47,7 @@ input[type=number]{-moz-appearance:textfield}
 #landscape-lock{display:none;position:fixed;inset:0;background:#08080d;z-index:99999;
   flex-direction:column;align-items:center;justify-content:center;gap:16px;font-family:'Outfit',sans-serif}
 @keyframes fadeInDown{from{opacity:0;transform:translateX(-50%) translateY(-10px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
+@keyframes checkinPulse{0%,100%{box-shadow:0 0 0 0 rgba(0,245,160,0.3)}50%{box-shadow:0 0 0 6px rgba(0,245,160,0)}}
 </style>
 <script>try{var t=localStorage.getItem("ft-theme");if(t&&JSON.parse(t)==="light"){document.documentElement.style.background="#f5f5f7";}}catch(e){}</script>
 </head>
@@ -2798,6 +2799,81 @@ function ReadinessCard({s,d}){
 }
 
 // ─── Readiness Trend (Track Hub) ───
+// ── T3 #20: Sleep-to-Performance Correlation Card ──
+function SleepPerformanceCard({s}){
+  const data=useMemo(()=>{
+    // For each workout day in last 30d, find the prior-night sleep
+    const pts=[];
+    s.workouts.filter(w=>w.date>=ago(29)).forEach(w=>{
+      // Prior night sleep: check checkin on same day or nutrition log
+      const checkin=(s.checkins||[]).find(c=>c.date===w.date);
+      const nutr=s.nutrition.find(n=>n.date===w.date);
+      const sleep=parseFloat(checkin?.sleep||nutr?.sleep||0);
+      if(sleep<3)return; // skip no-data days
+      // Session volume
+      const vol=Math.round(w.exercises.reduce((a,e)=>a+e.sets.reduce((b,st)=>b+(parseFloat(st.weight)||0)*(parseInt(st.reps)||0),0),0));
+      if(vol===0)return;
+      pts.push({date:w.date,sleep,vol});
+    });
+    return pts;
+  },[s.workouts,s.checkins,s.nutrition]);
+
+  if(data.length<4)return null;
+
+  // Bucket by sleep quality
+  const poor=data.filter(p=>p.sleep<6);
+  const ok=data.filter(p=>p.sleep>=6&&p.sleep<7.5);
+  const good=data.filter(p=>p.sleep>=7.5);
+  const avg=(arr)=>arr.length?Math.round(arr.reduce((a,p)=>a+p.vol,0)/arr.length):0;
+  const poorAvg=avg(poor), okAvg=avg(ok), goodAvg=avg(good);
+
+  // Insight text
+  const maxBucket=[{l:"<6h",v:poorAvg,n:poor.length},{l:"6-7.5h",v:okAvg,n:ok.length},{l:"7.5h+",v:goodAvg,n:good.length}]
+    .filter(b=>b.n>=2).sort((a,b)=>b.v-a.v);
+  if(maxBucket.length<2)return null;
+  const best=maxBucket[0], worst=maxBucket[maxBucket.length-1];
+  const diff=best.v>0&&worst.v>0?Math.round((best.v-worst.v)/worst.v*100):0;
+  const insight=diff>10
+    ?`You lift ~${diff}% more volume after ${best.l} sleep vs ${worst.l}`
+    :"Sleep quality has minimal impact on your volume — nice consistency";
+
+  const bars=[
+    {label:"<6h",avg:poorAvg,count:poor.length,color:"#f43f5e"},
+    {label:"6–7.5h",avg:okAvg,count:ok.length,color:"#f59e0b"},
+    {label:"7.5h+",avg:goodAvg,count:good.length,color:"#22c55e"},
+  ].filter(b=>b.count>0);
+  const maxVol=Math.max(...bars.map(b=>b.avg),1);
+
+  return(
+    <div style={{padding:"12px 14px",borderRadius:12,
+      background:"rgba(139,92,246,0.06)",border:"1px solid rgba(139,92,246,0.15)"}}>
+      <div style={{fontSize:11,fontWeight:700,color:V.purple,textTransform:"uppercase",letterSpacing:".06em",marginBottom:9}}>
+        😴 Sleep vs Performance
+      </div>
+      <div style={{display:"flex",gap:10,alignItems:"flex-end",marginBottom:10,height:60}}>
+        {bars.map(bar=>{
+          const h=bar.avg>0?Math.max(10,Math.round(bar.avg/maxVol*56)):8;
+          return(
+            <div key={bar.label} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
+              <div style={{fontSize:8,color:bar.color,fontWeight:700,fontFamily:"monospace"}}>
+                {bar.avg>=10000?(bar.avg/1000).toFixed(1)+"k":bar.avg>0?bar.avg:"—"}
+              </div>
+              <div style={{width:"100%",height:h,borderRadius:4,background:bar.avg>0?bar.color+"55":"rgba(255,255,255,0.06)",
+                border:`1px solid ${bar.color}40`,transition:"height .4s ease"}}/>
+              <div style={{fontSize:8,color:V.text3}}>{bar.label}</div>
+              <div style={{fontSize:7,color:V.text3,opacity:0.6}}>{bar.count}d</div>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{fontSize:10,color:V.text2,lineHeight:1.5,padding:"7px 9px",
+        background:"rgba(255,255,255,0.03)",borderRadius:8}}>
+        💡 {insight}
+      </div>
+    </div>
+  );
+}
+
 function ReadinessTrend({s}){
   const data=useMemo(()=>{
     const days=[];
@@ -2845,6 +2921,9 @@ function ReadinessTrend({s}){
           </div>
         </Card>
       )}
+
+      {/* ── T3 #20: Sleep vs Performance card ── */}
+      <SleepPerformanceCard s={s}/>
 
       {/* Check-in history */}
       <div style={{fontSize:13,fontWeight:700,color:V.text}}>Recent Check-ins</div>
@@ -2947,27 +3026,73 @@ function HomeTab({s,d}){
           <span style={{fontSize:18,color:V.warn}}>→</span>
         </div>
       )}
-      {/* Hero: Greeting + Today + Streak */}
-      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-        <div>
-          <div style={{display:"flex",alignItems:"center",gap:8}}>
-            <div style={{fontSize:12,color:V.text3}}>{greeting}{displayName?`, ${displayName}`:""}</div>
-            <SyncStatus s={s}/>
+      {/* ── FEATURE #2: Morning Briefing Hero ── */}
+      {(()=>{
+        const mult=getActiveMultiplier(s);
+        const tips=todayW
+          ?["Rest up — recovery is where you grow.","Hydrate and hit your protein today.","Great session! Log your nutrition to complete the day."]
+          :todayType==="Rest"
+            ?["Active rest: mobility work keeps you limber.","Recovery day — prioritize sleep and protein.","Foam roll, stretch, recover strong."]
+            :["Warm up for 5 min before your first set.","Focus on form today — quality over quantity.","Progressive overload: add 5 lbs if last session felt easy."];
+        const tip=tips[new Date().getDate()%tips.length];
+        const lastCheckin=(s.checkins||[]).find(c=>c.date===td);
+        const readinessOk=lastCheckin&&(lastCheckin.energy>=3||lastCheckin.motivation>=3);
+        return(
+          <div style={{padding:"14px 16px",borderRadius:14,
+            background:"linear-gradient(135deg,rgba(0,245,160,0.05),rgba(0,217,245,0.03))",
+            border:"1px solid rgba(0,245,160,0.1)"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
+              <div>
+                <div style={{fontSize:11,color:V.text3,marginBottom:2}}>{greeting}{displayName?`, ${displayName}`:""}</div>
+                <div style={{fontSize:19,fontWeight:800,color:V.text,lineHeight:1.1}}>
+                  {todayType==="Rest"?"Recovery Day":`${todayType} Day`}
+                  {todayW&&<span style={{fontSize:12,color:V.accent,marginLeft:8,fontWeight:600}}>✅ Done</span>}
+                </div>
+              </div>
+              <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4}}>
+                <SyncStatus s={s}/>
+                {mult.mult>1&&(
+                  <span style={{fontSize:9,fontWeight:800,padding:"2px 7px",borderRadius:6,
+                    background:mult.color+"20",color:mult.color,letterSpacing:".04em"}}>
+                    {mult.icon} {mult.label}
+                  </span>
+                )}
+              </div>
+            </div>
+            <div style={{fontSize:10,color:V.text3,lineHeight:1.5,borderTop:"1px solid rgba(255,255,255,0.05)",paddingTop:6,
+              display:"flex",alignItems:"center",gap:6}}>
+              <span style={{fontSize:12}}>💡</span>
+              <span>{tip}</span>
+            </div>
+            {!todayW&&todayType!=="Rest"&&(
+              <button onClick={()=>d({type:"TAB",tab:"log_workout"})} style={{
+                width:"100%",marginTop:10,padding:"9px",borderRadius:10,border:"none",
+                background:`${V.accent}15`,cursor:"pointer",fontSize:12,fontWeight:700,
+                color:V.accent,fontFamily:V.font,WebkitTapHighlightColor:"transparent"}}>
+                Start {todayType} Workout →
+              </button>
+            )}
           </div>
-          <div style={{fontSize:20,fontWeight:800,color:V.text,lineHeight:1.2}}>
-            {todayType==="Rest"?"Recovery Day":`${todayType} Day`}
-          </div>
-          {todayType!=="Rest"&&!todayW&&(
-            <div style={{fontSize:10,color:V.accent,fontWeight:600,marginTop:2,cursor:"pointer"}}
-              onClick={()=>d({type:"TAB",tab:"log_workout"})}>Tap to log → </div>
-          )}
-        </div>
+        );
+      })()}
         {streak>0&&(
           <div style={{display:"flex",alignItems:"center",gap:6,padding:"6px 12px",borderRadius:10,
             background:"rgba(255,159,67,0.1)",border:"1px solid rgba(255,159,67,0.12)"}}>
             {Icons.flame({size:14,color:V.warn})}
             <span style={{fontSize:15,fontWeight:800,color:V.warn,fontFamily:V.mono}}>{streak}</span>
-            {(()=>{const shields=parseInt(LS.get("ft-streak-shields"))||0;return shields>0?<span style={{fontSize:10,color:"#60a5fa",marginLeft:2}}>🛡️{shields}</span>:null;})()}
+            {(()=>{
+              const shields=parseInt(LS.get("ft-streak-shields"))||0;
+              if(shields<=0)return null;
+              return(
+                <span title={`${shields} streak shield${shields!==1?"s":""} — protects your streak for 1 missed day each`}
+                  style={{display:"flex",alignItems:"center",gap:2,
+                    padding:"1px 6px",borderRadius:5,background:"rgba(96,165,250,0.12)",
+                    border:"1px solid rgba(96,165,250,0.25)"}}>
+                  <span style={{fontSize:10}}>🛡️</span>
+                  <span style={{fontSize:9,fontWeight:700,color:"#60a5fa"}}>{shields}</span>
+                </span>
+              );
+            })()}
             {(()=>{
               // Calculate longest streak ever
               let best=0,cur=0;
@@ -2983,7 +3108,6 @@ function HomeTab({s,d}){
             })()}
           </div>
         )}
-      </div>
 
       {/* Today's Focus — unified workout CTA */}
       {(()=>{
@@ -3077,6 +3201,121 @@ function HomeTab({s,d}){
         return null;
       })()}
 
+      {/* ── FEATURE #4: Comeback card — shows after 2-14 days off ── */}
+      {(()=>{
+        const lastW=s.workouts[0]?.date;
+        if(!lastW)return null;
+        const daysOff=Math.floor((new Date()-new Date(lastW+"T12:00:00"))/86400000);
+        const dismissedDate=LS.get("ft-comeback-dismissed");
+        if(daysOff<2||daysOff>21||dismissedDate===lastW)return null;
+        const mult=getActiveMultiplier(s);
+        const msgs=[
+          {d:2,h:"Welcome back — two days off is good recovery.",e:"💪"},
+          {d:4,h:"Your muscles are rested and ready to fire.",e:"⚡"},
+          {d:7,h:"A week off — your strength is still there, trust it.",e:"🔥"},
+          {d:14,h:"The hardest workout is always the comeback one.",e:"🚀"},
+        ];
+        const msg=msgs.slice().reverse().find(m=>daysOff>=m.d)||msgs[0];
+        return(
+          <div style={{padding:"14px 16px",borderRadius:14,
+            background:"linear-gradient(135deg,rgba(34,197,94,0.08),rgba(0,245,160,0.04))",
+            border:"1px solid rgba(34,197,94,0.2)"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:4}}>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <span style={{fontSize:22}}>{msg.e}</span>
+                <div>
+                  <div style={{fontSize:13,fontWeight:800,color:"#22c55e"}}>
+                    Welcome back{displayName?`, ${displayName}`:""}!
+                  </div>
+                  <div style={{fontSize:10,color:V.text3}}>{daysOff} days since your last session</div>
+                </div>
+              </div>
+              <button onClick={()=>LS.set("ft-comeback-dismissed",lastW)} style={{
+                background:"none",border:"none",cursor:"pointer",fontSize:14,color:V.text3,padding:4}}>✕</button>
+            </div>
+            <div style={{fontSize:11,color:V.text2,marginBottom:10,lineHeight:1.5}}>{msg.h}</div>
+            {mult.mult>1&&(
+              <div style={{fontSize:10,fontWeight:700,color:mult.color,marginBottom:8}}>
+                {mult.icon} {mult.label} is active — great time to come back!
+              </div>
+            )}
+            <button onClick={()=>d({type:"TAB",tab:"log_workout"})} style={{
+              width:"100%",padding:"10px",borderRadius:10,border:"none",
+              background:"#22c55e20",cursor:"pointer",fontSize:13,fontWeight:700,
+              color:"#22c55e",fontFamily:V.font,WebkitTapHighlightColor:"transparent"}}>
+              Log Your Comeback Workout →
+            </button>
+          </div>
+        );
+      })()}
+
+      {/* ── T3 #16: Best Week Ever banner ── */}
+      {(()=>{
+        const dismissed=LS.get("ft-best-week-dismissed");
+        if(dismissed===today())return null;
+        const thisWeekWorkouts=s.workouts.filter(w=>w.date>=ago(6));
+        if(thisWeekWorkouts.length<2)return null;
+        const calcWeekVol=(ws)=>Math.round(ws.reduce((a,w)=>a+w.exercises.reduce((b,e)=>b+e.sets.reduce((c,st)=>c+(parseFloat(st.weight)||0)*(parseInt(st.reps)||0),0),0),0));
+        const thisVol=calcWeekVol(thisWeekWorkouts);
+        const thisCount=thisWeekWorkouts.length;
+        const priorVols=Array.from({length:10},(_,i)=>calcWeekVol(s.workouts.filter(w=>w.date>=ago(7*(i+1)+6)&&w.date<ago(7*(i+1)-1)))).filter(v=>v>0);
+        const priorCounts=Array.from({length:10},(_,i)=>s.workouts.filter(w=>w.date>=ago(7*(i+1)+6)&&w.date<ago(7*(i+1)-1)).length).filter(v=>v>0);
+        if(priorVols.length<1)return null;
+        const bestPriorVol=Math.max(...priorVols);
+        const bestPriorCount=Math.max(...priorCounts,0);
+        const isBestVol=thisVol>0&&thisVol>bestPriorVol;
+        const isBestCount=thisCount>bestPriorCount;
+        if(!isBestVol&&!isBestCount)return null;
+        const label=isBestVol&&isBestCount?"Most workouts AND highest volume week ever 🔥"
+          :isBestVol?`${thisVol>=10000?(thisVol/1000).toFixed(1)+"k":thisVol.toLocaleString()} lbs — your highest volume week ever 📈`
+          :`${thisCount} workouts — your most active week ever 🏆`;
+        return(
+          <div style={{padding:"11px 14px",borderRadius:12,
+            background:"linear-gradient(135deg,rgba(250,204,21,0.09),rgba(251,146,60,0.05))",
+            border:"1px solid rgba(250,204,21,0.22)",display:"flex",alignItems:"center",gap:10}}>
+            <span style={{fontSize:26,flexShrink:0}}>📈</span>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:12,fontWeight:800,color:"#fbbf24"}}>Best week ever!</div>
+              <div style={{fontSize:10,color:V.text3,marginTop:2,lineHeight:1.4}}>{label}</div>
+            </div>
+            <button onClick={()=>LS.set("ft-best-week-dismissed",today())}
+              style={{background:"none",border:"none",cursor:"pointer",fontSize:14,color:V.text3,padding:"4px 6px",flexShrink:0}}>✕</button>
+          </div>
+        );
+      })()}
+
+      {/* ── T3 #13: Friend workout nudge ── */}
+      {(()=>{
+        if(s.workouts.some(w=>w.date===today()))return null; // already trained
+        const cachedFeed=LS.get("ft-feed-cache");
+        if(!cachedFeed||!Array.isArray(cachedFeed.events))return null;
+        const myEmail=s.profile?.email;
+        const friendEvent=cachedFeed.events.find(ev=>
+          ev.type==="WorkoutLogged"&&!ev.isOwn&&ev.email!==myEmail&&
+          ev.created_at&&ev.created_at.slice(0,10)===today()
+        );
+        if(!friendEvent)return null;
+        const fname=(friendEvent.name||"A friend").split(" ")[0];
+        const exs=friendEvent.data?.exercises;
+        const muscle=Array.isArray(exs)&&exs.length>0?exs[0]:null;
+        return(
+          <div onClick={()=>d({type:"TAB",tab:"log_workout"})}
+            style={{padding:"10px 14px",borderRadius:12,cursor:"pointer",
+              background:"linear-gradient(135deg,rgba(99,102,241,0.08),rgba(139,92,246,0.04))",
+              border:"1px solid rgba(99,102,241,0.2)",display:"flex",alignItems:"center",gap:10,
+              WebkitTapHighlightColor:"transparent"}}>
+            <span style={{fontSize:22,flexShrink:0}}>👀</span>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:12,fontWeight:800,color:V.accent2}}>
+                {fname} just hit the gym{muscle?` · ${muscle}`:""}
+              </div>
+              <div style={{fontSize:10,color:V.text3,marginTop:1}}>You haven't trained yet — your move 💪</div>
+            </div>
+            <span style={{fontSize:18,color:V.accent2,flexShrink:0}}>→</span>
+          </div>
+        );
+      })()}
+
       {/* Quick Actions — compact */}
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
         {[
@@ -3100,6 +3339,95 @@ function HomeTab({s,d}){
 
       {/* Daily XP Missions */}
       <DailyMissionsCard s={s} d={d}/>
+
+      {/* ── FEATURE #1: Weekly Recap Card ── */}
+      {(()=>{
+        const isWeekend=new Date().getDay()===0||new Date().getDay()===6;
+        const dismissed=LS.get("ft-weekly-recap-dismissed");
+        const weekOf=ago(0); // today
+        if(dismissed===weekOf&&!isWeekend)return null;
+        const weekWorkouts=s.workouts.filter(w=>w.date>=ago(7));
+        if(weekWorkouts.length<2)return null; // need at least 2 to be interesting
+        const weekVol=Math.round(weekWorkouts.reduce((a,w)=>a+w.exercises.reduce((b,e)=>b+e.sets.reduce((c,st)=>c+(parseFloat(st.weight)||0)*(parseInt(st.reps)||0),0),0),0));
+        const prevWeekWorkouts=s.workouts.filter(w=>w.date>=ago(14)&&w.date<ago(7));
+        const prevVol=Math.round(prevWeekWorkouts.reduce((a,w)=>a+w.exercises.reduce((b,e)=>b+e.sets.reduce((c,st)=>c+(parseFloat(st.weight)||0)*(parseInt(st.reps)||0),0),0),0));
+        const volDiff=prevVol>0?Math.round((weekVol-prevVol)/prevVol*100):null;
+        const weekProt=s.nutrition.filter(n=>n.date>=ago(7)&&(n.protein||0)>=(s.goals?.protein||150)).length;
+        const weekXP=(()=>{const log=(getXPBonus().log||[]);const cutoff=ago(7);return log.filter(e=>e.date>=cutoff).reduce((a,e)=>a+(e.amount||0),0)+weekWorkouts.length*30;})();
+        const bestSession=weekWorkouts.reduce((best,w)=>{const v=w.exercises.reduce((a,e)=>a+e.sets.reduce((b,st)=>b+(parseFloat(st.weight)||0)*(parseInt(st.reps)||0),0),0);return v>best.v?{v,w}:{...best};},{v:0,w:null});
+        const goal=parseInt(s.goals?.workoutsPerWeek)||5;
+        const hitGoal=weekWorkouts.length>=goal;
+        return(
+          <Card style={{padding:14,background:"linear-gradient(135deg,rgba(0,245,160,0.06),rgba(139,92,246,0.04))",
+            border:`1px solid ${hitGoal?"rgba(0,245,160,0.2)":"rgba(255,255,255,0.08)"}`}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+              <div>
+                <div style={{fontSize:11,fontWeight:700,color:V.text3,textTransform:"uppercase",letterSpacing:".06em"}}>
+                  {new Date().getDay()===0?"This Week's Summary":"Week in Review"}
+                </div>
+                <div style={{fontSize:14,fontWeight:800,color:hitGoal?V.accent:V.text,marginTop:2}}>
+                  {hitGoal?"🏆 Goal smashed! "+weekWorkouts.length+"/"+goal+" workouts":"💪 "+weekWorkouts.length+" / "+goal+" workouts this week"}
+                </div>
+              </div>
+              <button onClick={()=>LS.set("ft-weekly-recap-dismissed",weekOf)}
+                style={{background:"none",border:"none",cursor:"pointer",fontSize:14,color:V.text3,padding:4}}>✕</button>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:10}}>
+              {[
+                {label:"Volume",val:weekVol>=10000?`${(weekVol/1000).toFixed(1)}k`:weekVol.toLocaleString(),sub:volDiff!==null?(volDiff>=0?"↑"+volDiff+"%":"↓"+Math.abs(volDiff)+"%"):"lbs",c:volDiff===null?V.accent2:volDiff>=0?V.accent:V.danger},
+                {label:"Protein Days",val:weekProt+"/7",sub:"days on target",c:weekProt>=5?V.accent:weekProt>=3?V.warn:V.danger},
+                {label:"XP Earned",val:"+"+weekXP,sub:"this week",c:V.purple},
+              ].map(stat=>(
+                <div key={stat.label} style={{background:"rgba(255,255,255,0.03)",borderRadius:10,padding:"8px 10px",textAlign:"center"}}>
+                  <div style={{fontSize:15,fontWeight:800,color:stat.c,fontFamily:V.mono}}>{stat.val}</div>
+                  <div style={{fontSize:8,color:V.text3,marginTop:2,fontWeight:600,textTransform:"uppercase"}}>{stat.label}</div>
+                  <div style={{fontSize:8,color:stat.c,marginTop:1,fontWeight:600}}>{stat.sub}</div>
+                </div>
+              ))}
+            </div>
+            {bestSession.w&&(
+              <div style={{fontSize:10,color:V.text3,padding:"6px 10px",background:"rgba(255,255,255,0.02)",borderRadius:8}}>
+                <span style={{color:V.accent,fontWeight:700}}>Best session: </span>
+                {bestSession.w.exercises.map(e=>s.exercises.find(x=>x.id===e.exerciseId)?.name?.split(" ")[0]||e.exerciseId).join(", ")}
+                {" · "}{bestSession.v>=10000?`${(bestSession.v/1000).toFixed(1)}k`:Math.round(bestSession.v)} lbs
+              </div>
+            )}
+          </Card>
+        );
+      })()}
+
+      {/* ── T4 #19: Session duration drop alert ── */}
+      {(()=>{
+        const wkts=s.workouts.filter(w=>parseInt(w.dur||0)>5);
+        if(wkts.length<6)return null;
+        const recent=wkts.filter(w=>w.date>=ago(13)).slice(0,5);
+        const older=wkts.filter(w=>w.date>=ago(41)&&w.date<ago(14)).slice(0,8);
+        if(recent.length<3||older.length<3)return null;
+        const avgRecent=Math.round(recent.reduce((a,w)=>a+parseInt(w.dur),0)/recent.length);
+        const avgOlder=Math.round(older.reduce((a,w)=>a+parseInt(w.dur),0)/older.length);
+        const drop=avgOlder-avgRecent;
+        const dropPct=Math.round(drop/avgOlder*100);
+        if(dropPct<20)return null; // only flag if 20%+ drop
+        const dismissed=LS.get("ft-dur-alert-dismissed");
+        if(dismissed===ago(0))return null;
+        return(
+          <div style={{padding:"10px 14px",borderRadius:12,
+            background:"rgba(245,158,11,0.06)",border:"1px solid rgba(245,158,11,0.2)",
+            display:"flex",alignItems:"center",gap:10}}>
+            <span style={{fontSize:20,flexShrink:0}}>⏱️</span>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:11,fontWeight:800,color:V.warn}}>Sessions getting shorter</div>
+              <div style={{fontSize:10,color:V.text3,marginTop:1,lineHeight:1.4}}>
+                Avg {avgRecent}min lately vs {avgOlder}min before — {dropPct}% drop.
+                Could be life getting busy, or a deload. Keep tabs on it.
+              </div>
+            </div>
+            <button onClick={()=>LS.set("ft-dur-alert-dismissed",ago(0))}
+              style={{background:"none",border:"none",cursor:"pointer",
+                fontSize:14,color:V.text3,padding:"4px 6px",flexShrink:0}}>✕</button>
+          </div>
+        );
+      })()}
 
       {/* Week + Stats combined in one card */}
       <Card style={{padding:14}}>
@@ -3273,15 +3601,15 @@ function HomeTab({s,d}){
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
             <div style={{display:"flex",alignItems:"center",gap:5}}>
               {Icons.trophy({size:13,color:V.warn})}
-              <span style={{fontSize:11,fontWeight:700,color:V.text3,textTransform:"uppercase",letterSpacing:".06em"}}>Top PRs</span>
+              <span style={{fontSize:11,fontWeight:700,color:V.text3,textTransform:"uppercase",letterSpacing:".06em"}}>Latest PRs 🔥</span>
             </div>
             <button onClick={()=>d({type:"TAB",tab:"track_workouts"})} style={{background:"none",border:"none",cursor:"pointer",
               fontSize:10,color:V.accent,fontWeight:600,WebkitTapHighlightColor:"transparent"}}>All</button>
           </div>
-          {Object.entries(prs).sort((a,b)=>b[1].e1rm-a[1].e1rm).slice(0,3).map(([id,pr])=>(
+          {Object.entries(prs).sort((a,b)=>b[1].date.localeCompare(a[1].date)).slice(0,3).map(([id,pr])=>(
             <div key={id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 0",borderBottom:"1px solid rgba(255,255,255,0.03)"}}>
               <span style={{fontSize:12,color:V.text}}>{pr.name}</span>
-              <span style={{fontSize:12,color:V.accent,fontFamily:V.mono,fontWeight:700}}>{pr.weight}×{pr.reps}</span>
+              <div style={{textAlign:"right"}}><div style={{fontSize:12,color:V.accent,fontFamily:V.mono,fontWeight:700}}>{pr.weight}×{pr.reps}</div><div style={{fontSize:8,color:V.text3}}>{fmtShort(pr.date)}</div></div>
             </div>
           ))}
         </Card>
@@ -3530,19 +3858,45 @@ function WorkoutTab({s,d}){
       const prBonus=detected.length*20;
       // B20 fix: always store PR bonus XP in pool; multiplier bonus is extra on top
       if(prBonus>0)addXPBonus(prBonus,`PR Bonus (${detected.length} PR${detected.length>1?"s":""})`);
-      const multBase=30+prBonus;
+
+      // ── T4 #9: Per-exercise consistency XP bonus ──
+      // Award 10 XP per exercise trained 3+ times in last 14 days (streak per lift)
+      let consistencyBonus=0;
+      const consistencyDetails=[];
+      w.exercises.forEach(ex=>{
+        const exId=ex.exerciseId;
+        const recentCount=s.workouts.filter(pw=>pw.date>=ago(13)&&pw.date<today())
+          .filter(pw=>pw.exercises.some(e=>e.exerciseId===exId)).length;
+        if(recentCount>=2){ // 2 in prior 14d + today = 3+ total
+          const streakKey="ft-cons-"+exId;
+          const lastAwarded=LS.get(streakKey);
+          if(lastAwarded!==today()){
+            LS.set(streakKey,today());
+            const exName=s.exercises.find(e=>e.id===exId)?.name||exId;
+            const shortName=exName.split(" ").slice(0,2).join(" ");
+            consistencyBonus+=10;
+            consistencyDetails.push(shortName);
+          }
+        }
+      });
+      if(consistencyBonus>0){
+        addXPBonus(consistencyBonus,`Consistency (${consistencyDetails.slice(0,2).join(", ")}${consistencyDetails.length>2?"…":""})`);
+      }
+
+      const multBase=30+prBonus+consistencyBonus;
       const totalGain=Math.round(multBase*mult.mult);
       const multBonus=totalGain-multBase;
       if(multBonus>0){
         addXPBonus(multBonus, mult.label||"XP Multiplier");
         if(mult.mult===3)LS.set("ft-comeback-used",today());
       }
-      const displayXP=30+prBonus+Math.max(0,multBonus);
+      const displayXP=30+prBonus+consistencyBonus+Math.max(0,multBonus);
       const xpMsg=mult.mult>1?`+${displayXP} XP ${mult.icon} (${mult.mult}\u00d7 bonus!)`:
-        detected.length>0?`+${30+prBonus} XP \u00b7 ${detected.length} PR${detected.length>1?"s":""}! \U0001f3af`:`+30 XP \U0001f4aa`;
+        detected.length>0?`+${30+prBonus+consistencyBonus} XP \u00b7 ${detected.length} PR${detected.length>1?"s":""}! \U0001f3af`:consistencyBonus>0?`+${30+consistencyBonus} XP \u00b7 consistency bonus! 🔄`:`+30 XP \U0001f4aa`;
       SuccessToastCtrl.show("Workout logged · "+xpMsg);
-      // Check missions
+      // Check missions + milestones
       setTimeout(()=>checkAndAwardMissions({...s,workouts:[w,...s.workouts]},d),500);
+      checkMilestones(s, w, detected);
       if(s.profile?.email){const exNames=w.exercises.map(e=>s.exercises.find(x=>x.id===e.exerciseId)?.name||e.exerciseId);
         SocialAPI.logEvent(s.profile.email,"WorkoutLogged",{exercises:exNames,sets:w.exercises.reduce((a,e)=>a+e.sets.length,0)},
           (LS.get("ft-privacy")||{}).workouts?"friends":"private").catch(()=>{});
@@ -4175,6 +4529,75 @@ function NutritionTab({s,d}){
         </div>
       )}
 
+      {/* ── T3 #17: Nutrition gap/pattern analysis ── */}
+      {(()=>{
+        if(s.nutrition.length<7)return null;
+        const protGoal=s.goals?.protein||150;
+        const calGoal=s.goals?.cal||2200;
+        const dayNames=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+        // Analyse last 28 days grouped by day-of-week
+        const dowData=Array.from({length:7},(_,dow)=>{
+          const entries=s.nutrition.filter(n=>{
+            const d=new Date(n.date+"T12:00:00");
+            return d.getDay()===dow&&n.date>=ago(27);
+          });
+          return{
+            dow,name:dayNames[dow],
+            count:entries.length,
+            protHit:entries.filter(n=>n.protein>=protGoal*0.9).length,
+            calHit:entries.filter(n=>n.cal>=calGoal*0.8&&n.cal<=calGoal*1.15).length,
+            avgProt:entries.length?Math.round(entries.reduce((a,n)=>a+(n.protein||0),0)/entries.length):0,
+          };
+        });
+        // Find worst protein days (logged but consistently missed)
+        const weakDays=dowData.filter(d=>d.count>=2&&d.protHit/d.count<0.5).map(d=>d.name);
+        // Find strongest days
+        const strongDays=dowData.filter(d=>d.count>=2&&d.protHit/d.count>=0.85).map(d=>d.name);
+        // Streak insights: how many days logged this week vs last week
+        const thisW=s.nutrition.filter(n=>n.date>=ago(6)).length;
+        const lastW=s.nutrition.filter(n=>n.date>=ago(13)&&n.date<ago(6)).length;
+        const insights=[];
+        if(weakDays.length>0)insights.push({icon:"⚠️",color:V.warn,text:`Protein gap on ${weakDays.slice(0,2).join(" & ")} — plan ahead`});
+        if(strongDays.length>0)insights.push({icon:"💪",color:V.accent,text:`Nailing protein on ${strongDays.slice(0,2).join(" & ")} — keep that up`});
+        if(thisW>lastW)insights.push({icon:"📈",color:V.accent,text:`${thisW} days logged this week vs ${lastW} last — consistency building`});
+        else if(thisW<lastW&&lastW>=4)insights.push({icon:"📉",color:V.warn,text:`${lastW-thisW} fewer logs than last week — stay on track`});
+        // Check if frequently under-eating
+        const under=s.nutrition.filter(n=>n.date>=ago(13)&&n.cal>0&&n.cal<calGoal*0.75).length;
+        if(under>=4)insights.push({icon:"🔋",color:V.danger,text:`Under-fuelling ${under} days lately — calories too low`});
+        if(insights.length===0)return null;
+        return(
+          <div style={{padding:"12px 14px",borderRadius:12,
+            background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.06)"}}>
+            <div style={{fontSize:11,fontWeight:700,color:V.text3,textTransform:"uppercase",
+              letterSpacing:".06em",marginBottom:9}}>📊 Patterns</div>
+            {/* 7-day DOW protein heat strip */}
+            <div style={{display:"flex",gap:3,marginBottom:10}}>
+              {dowData.map(d=>{
+                const rate=d.count>0?d.protHit/d.count:null;
+                const bg=rate===null?"rgba(255,255,255,0.04)":rate>=0.85?"rgba(0,245,160,0.35)":rate>=0.5?"rgba(245,158,11,0.35)":"rgba(244,63,94,0.25)";
+                return(
+                  <div key={d.dow} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
+                    <div style={{width:"100%",height:20,borderRadius:4,background:bg,
+                      display:"flex",alignItems:"center",justifyContent:"center"}}>
+                      {d.count>0&&<span style={{fontSize:7,fontWeight:700,color:"rgba(255,255,255,0.5)"}}>{d.avgProt}g</span>}
+                    </div>
+                    <span style={{fontSize:7,color:V.text3}}>{d.name.slice(0,2)}</span>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:5}}>
+              {insights.slice(0,3).map((ins,i)=>(
+                <div key={i} style={{display:"flex",alignItems:"flex-start",gap:6}}>
+                  <span style={{fontSize:12,flexShrink:0}}>{ins.icon}</span>
+                  <span style={{fontSize:10,color:V.text2,lineHeight:1.4}}>{ins.text}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
       <Card>
         <span style={{fontSize:11,color:V.text3,fontWeight:700,display:"block",marginBottom:12,textTransform:"uppercase",letterSpacing:".06em"}}>Macros</span>
         <ResponsiveContainer width="100%" height={150}>
@@ -4424,6 +4847,79 @@ function BodyTab({s,d}){
               </div>}
             </div>
           </Card>
+        );
+      })()}
+
+      {/* ── T4 #18: Body weight trend prediction ── */}
+      {(()=>{
+        const wtPts=s.body.filter(b=>parseFloat(b.weight)>0)
+          .sort((a,b)=>a.date.localeCompare(b.date));
+        if(wtPts.length<4)return null;
+        // Simple linear regression over last 14 entries (or all if fewer)
+        const pts=wtPts.slice(-14);
+        const n=pts.length;
+        const xs=pts.map((_,i)=>i);
+        const ys=pts.map(p=>parseFloat(p.weight));
+        const xMean=xs.reduce((a,x)=>a+x,0)/n;
+        const yMean=ys.reduce((a,y)=>a+y,0)/n;
+        const slope=xs.reduce((a,x,i)=>a+(x-xMean)*(ys[i]-yMean),0)/
+                    xs.reduce((a,x)=>a+(x-xMean)**2,0);
+        const intercept=yMean-slope*xMean;
+        // Days between latest two entries
+        const daysBetween=pts.length>=2?
+          Math.round((new Date(pts[pts.length-1].date)-new Date(pts[pts.length-2].date))/86400000):1;
+        const stepsToProject=Math.round(30/Math.max(daysBetween,1));
+        const proj30=parseFloat((intercept+slope*(n-1+stepsToProject)).toFixed(1));
+        const proj60=parseFloat((intercept+slope*(n-1+stepsToProject*2)).toFixed(1));
+        const current=ys[ys.length-1];
+        const delta30=parseFloat((proj30-current).toFixed(1));
+        const delta60=parseFloat((proj60-current).toFixed(1));
+        if(Math.abs(slope)<0.001)return null; // flat — not interesting
+        const goalWeight=parseFloat(s.goals?.goalWeight)||0;
+        // Days to goal
+        let daysToGoal=null;
+        if(goalWeight>0&&Math.abs(delta30)>0.05){
+          const stepsNeeded=(goalWeight-intercept)/slope-(n-1);
+          const daysNeeded=Math.round(stepsNeeded*daysBetween);
+          if(daysNeeded>0&&daysNeeded<730)daysToGoal=daysNeeded;
+        }
+        const losing=slope<0;
+        const trendColor=losing?V.accent:"#f97316";
+        return(
+          <div style={{padding:"12px 14px",borderRadius:12,
+            background:`linear-gradient(135deg,${trendColor}08,rgba(0,0,0,0))`,
+            border:`1px solid ${trendColor}22`}}>
+            <div style={{fontSize:11,fontWeight:700,color:V.text3,textTransform:"uppercase",
+              letterSpacing:".06em",marginBottom:10}}>📉 Trend Projection</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:daysToGoal?10:0}}>
+              {[
+                {label:"30-day projection",val:proj30,delta:delta30},
+                {label:"60-day projection",val:proj60,delta:delta60},
+              ].map(p=>(
+                <div key={p.label} style={{padding:"9px 10px",borderRadius:10,
+                  background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.06)"}}>
+                  <div style={{fontSize:9,color:V.text3,marginBottom:4}}>{p.label}</div>
+                  <div style={{fontSize:18,fontWeight:800,color:trendColor,fontFamily:V.mono,lineHeight:1}}>
+                    {p.val} <span style={{fontSize:9}}>{wUnit(s.units)}</span>
+                  </div>
+                  <div style={{fontSize:9,fontWeight:700,marginTop:3,
+                    color:losing?(p.delta<0?V.accent:V.danger):(p.delta>0?V.accent:"#f97316")}}>
+                    {p.delta>0?"+":""}{p.delta} {wUnit(s.units)}
+                  </div>
+                </div>
+              ))}
+            </div>
+            {daysToGoal&&(
+              <div style={{padding:"7px 10px",borderRadius:8,
+                background:`${V.accent}08`,border:`1px solid ${V.accent}18`,
+                fontSize:10,color:V.text2}}>
+                🎯 At this rate, you'll reach {goalWeight}{wUnit(s.units)} in ~<strong style={{color:V.accent}}>{daysToGoal} days</strong>
+              </div>
+            )}
+            <div style={{fontSize:8,color:V.text3,marginTop:8,opacity:0.6}}>
+              Based on last {pts.length} weigh-ins · update by logging regularly
+            </div>
+          </div>
         );
       })()}
 
@@ -5910,8 +6406,9 @@ function Onboarding({d}){
   const [accountPin,setAccountPin]=useState("");
   const [confirmPin,setConfirmPin]=useState("");
   const [pinError,setPinError]=useState("");
+  const [primaryGoal,setPrimaryGoal]=useState("");
   const [profile,setProfile]=useState({
-    firstName:"",lastName:"",nickname:"",email:"",dob:"",sex:"",state:"",
+    firstName:"",lastName:"",nickname:"",email:"",dob:"",sex:"",state:"",city:"",zipCode:"",
     height:"",fitnessLevel:"",activityLevel:"",weeklyAvailability:""
   });
 
@@ -5961,7 +6458,7 @@ function Onboarding({d}){
       ...profile,
       currentWeight:parseFloat(bw)||null,
       targetWeight:parseInt(goals.goalWeight)||null,
-      units,split,
+      units,split,primaryGoal,
       goals:{cal:parseInt(goals.cal),protein:parseInt(goals.protein),carbs:parseInt(goals.carbs),fat:parseInt(goals.fat)},
       accountPin:accountPin,
       createdAt:new Date().toISOString(),
@@ -6594,7 +7091,38 @@ function Onboarding({d}){
         <Btn full onClick={()=>setStep(3)} s={{marginTop:8}}>Next</Btn>
       </div>
     ),
-    // Step 3: Goals + Body Weight
+    // Step 3: Primary Goal
+    ()=>(
+      <div>
+        <div style={{fontSize:18,fontWeight:700,marginBottom:4}}>Primary Goal</div>
+        <div style={{fontSize:13,color:V.text3,marginBottom:16}}>What are you training for?</div>
+        {[
+          {id:"Build Muscle",icon:"💪",desc:"Add size and strength"},
+          {id:"Lose Fat",icon:"🔥",desc:"Cut body fat, stay lean"},
+          {id:"Body Recomposition",icon:"⚖️",desc:"Lose fat and gain muscle simultaneously"},
+          {id:"Strength",icon:"🏋️",desc:"Maximize raw strength and PRs"},
+          {id:"Maintain Fitness",icon:"🎯",desc:"Stay consistent and healthy"},
+        ].map(g=>(
+          <button key={g.id} onClick={()=>setPrimaryGoal(g.id)} style={{
+            display:"flex",alignItems:"center",gap:14,width:"100%",padding:"14px 16px",marginBottom:8,
+            borderRadius:14,textAlign:"left",
+            border:`2px solid ${primaryGoal===g.id?V.accent:V.cardBorder}`,
+            background:primaryGoal===g.id?`${V.accent}10`:"rgba(255,255,255,0.02)",
+            cursor:"pointer",WebkitTapHighlightColor:"transparent",
+            transition:"all .15s"
+          }}>
+            <span style={{fontSize:24,flexShrink:0}}>{g.icon}</span>
+            <div>
+              <div style={{fontSize:14,fontWeight:700,color:primaryGoal===g.id?V.accent:V.text}}>{g.id}</div>
+              <div style={{fontSize:11,color:V.text3,marginTop:2}}>{g.desc}</div>
+            </div>
+            {primaryGoal===g.id&&<span style={{marginLeft:"auto",color:V.accent,fontSize:16}}>✓</span>}
+          </button>
+        ))}
+        <Btn full onClick={()=>setStep(4)} disabled={!primaryGoal} s={{marginTop:8}}>Next</Btn>
+      </div>
+    ),
+    // Step 4: Goals + Body Weight
     ()=>(
       <div>
         <div style={{fontSize:18,fontWeight:700,marginBottom:4}}>Your Goals</div>
@@ -6609,10 +7137,10 @@ function Onboarding({d}){
           <Field label="Current Weight" type="number" value={bw} onChange={setBw} unit={units}/>
           <Field label="Goal Weight" type="number" value={goals.goalWeight} onChange={v=>setGoals(g=>({...g,goalWeight:v}))} unit={units}/>
         </div>
-        <Btn full onClick={()=>setStep(4)} s={{marginTop:16}}>Next</Btn>
+        <Btn full onClick={()=>setStep(5)} s={{marginTop:16}}>Next</Btn>
       </div>
     ),
-    // Step 4: Profile Setup
+    // Step 5: Profile Setup
     ()=>(
       <div>
         <div style={{fontSize:18,fontWeight:700,marginBottom:4}}>Profile Setup</div>
@@ -6649,6 +7177,10 @@ function Onboarding({d}){
             <option value="" style={{background:V.bg}}>Select state...</option>
             {US_STATES.map(st=><option key={st} value={st} style={{background:V.bg}}>{st}</option>)}
           </select>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginTop:10}}>
+          <Field label="City" value={profile.city} onChange={v=>setProfile(p=>({...p,city:v}))} placeholder="e.g. Austin"/>
+          <Field label="Zip Code" type="text" value={profile.zipCode} onChange={v=>setProfile(p=>({...p,zipCode:v.replace(/\D/g,"").slice(0,5)}))} placeholder="e.g. 78701"/>
         </div>
 
         {/* Optional fields */}
@@ -6736,7 +7268,7 @@ function Onboarding({d}){
         )}
       </div>
     ),
-    // Step 5: Account PIN
+    // Step 6: Account PIN
     ()=>(
       <div>
         <div style={{fontSize:18,fontWeight:700,marginBottom:4}}>Secure Your Account</div>
@@ -6805,20 +7337,24 @@ function Onboarding({d}){
       display:"flex",flexDirection:"column",padding:"0 24px",overflowY:"auto",WebkitOverflowScrolling:"touch"}}>
       <div style={{flex:1,display:"flex",flexDirection:"column",justifyContent:step<=3?"center":"flex-start",
         paddingTop:step>3?20:0,paddingBottom:40}}>
-      {/* Back button + Progress dots */}
+      {/* Back button + Step counter */}
       {step>0&&(
-        <button onClick={()=>setStep(s=>s-1)} style={{background:"none",border:"none",display:"flex",alignItems:"center",
-          gap:5,padding:"8px 0",marginBottom:12,cursor:"pointer",WebkitTapHighlightColor:"transparent"}}>
-          {Icons.chevLeft({size:18,color:V.accent})}
-          <span style={{fontSize:14,color:V.accent,fontWeight:600}}>Back</span>
-        </button>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:20}}>
+          <button onClick={()=>setStep(s=>s-1)} style={{background:"none",border:"none",display:"flex",alignItems:"center",
+            gap:5,padding:"8px 0",cursor:"pointer",WebkitTapHighlightColor:"transparent"}}>
+            {Icons.chevLeft({size:18,color:V.accent})}
+            <span style={{fontSize:14,color:V.accent,fontWeight:600}}>Back</span>
+          </button>
+          <span style={{fontSize:12,color:V.text3,fontWeight:600}}>Step {step} of {steps.length-1}</span>
+          <div style={{width:40}}/>
+        </div>
       )}
-      <div style={{display:"flex",justifyContent:"center",gap:8,marginBottom:30}}>
-        {steps.map((_,i)=>(
-          <div key={i} style={{width:i===step?24:8,height:8,borderRadius:4,
-            background:i<=step?V.accent:"rgba(255,255,255,0.08)",transition:"all .3s"}}/>
-        ))}
-      </div>
+      {step>0&&(
+        <div style={{height:3,borderRadius:2,background:"rgba(255,255,255,0.06)",marginBottom:24}}>
+          <div style={{height:3,borderRadius:2,width:`${(step/(steps.length-1))*100}%`,
+            background:`linear-gradient(90deg,${V.accent},${V.accent2})`,transition:"width .3s"}}/>
+        </div>
+      )}
       {steps[step]()}
       </div>
     </div>
@@ -11210,7 +11746,7 @@ function AICoachChat({s}){
 
 // ─── Social Community (Foundation) ───
 // ─── Social Tab Hub (like TrackHub) ───
-function SocialTab({s,d}){
+function SocialTab({s,d,unreadMsgCount=0}){
   // Quick stats for display
   const email=s.profile?.email;
   const streak=useStreak(s.workouts);
@@ -11259,7 +11795,7 @@ function SocialTab({s,d}){
       ]}/>
 
       <SectionGrid d={d} title="Connections" items={[
-        {id:"social_messages",icon:Icons.activity,label:"Messages",desc:"iMessage-style DMs",color:"#22c55e"},
+        {id:"social_messages",icon:Icons.activity,label:"Messages",desc:unreadMsgCount>0?`${unreadMsgCount} unread`:"iMessage-style DMs",color:"#22c55e",badge:unreadMsgCount},
         {id:"social_friends",icon:Icons.target,label:"Friends",desc:"Add, compare & manage",color:"#06b6d4"},
         {id:"social_groups",icon:Icons.target,label:"Groups",desc:"Crews, leaderboards & stats",color:"#f59e0b"},
         {id:"social_compare",icon:Icons.chart,label:"You vs Best",desc:"Personal records race",color:"#a78bfa"},
@@ -11286,8 +11822,30 @@ function SocialFeed({s,d}){
   const [feedData,setFeedData]=useState(null);
   const [notifs,setNotifs]=useState(null);
   const [loadErr,setLoadErr]=useState(false);
-  const loadFeed=()=>{const em=emailRef.current;setLoadErr(false);if(em){SocialAPI.getFeed(em).then(r=>{if(r)setFeedData(r);else setLoadErr(true);});SocialAPI.getNotifications(em).then(setNotifs);}};
+  const [newPostCount,setNewPostCount]=useState(0);
+  const lastSeenIdRef=useRef(null);
+  const loadFeed=(silent)=>{const em=emailRef.current;if(!silent)setLoadErr(false);if(em){
+    SocialAPI.getFeed(em).then(r=>{
+      if(r){
+        // ── T3 #11: detect new posts since last seen ──
+        if(lastSeenIdRef.current&&r.events){
+          const newOnes=r.events.filter(ev=>!ev.isOwn&&ev.id!==lastSeenIdRef.current&&
+            r.events.indexOf(ev)<r.events.findIndex(ev2=>ev2.id===lastSeenIdRef.current));
+          if(newOnes.length>0)setNewPostCount(n=>n+newOnes.length);
+        }
+        setFeedData(r);
+        // Cache latest feed for Home friend nudge
+        LS.set("ft-feed-cache",{events:(r.events||[]).slice(0,20),ts:Date.now()});
+      } else if(!silent){setLoadErr(true);}
+    });
+    SocialAPI.getNotifications(em).then(setNotifs);
+  }};
   useEffect(()=>{loadFeed();},[email]);
+  // ── Auto-refresh every 60s when feed is visible ──
+  useEffect(()=>{
+    const id=setInterval(()=>loadFeed(true),60000);
+    return()=>clearInterval(id);
+  },[]);
   const reactToEvent=async(eventId,emoji)=>{
     await SocialAPI.react(email,eventId,emoji);
     LS.set("ft-reacted-today",today()); // marks m_react mission as completable
@@ -11400,9 +11958,27 @@ function SocialFeed({s,d}){
         );
       })()}
       
+      {/* ── T3 #11: New-post pill + Friend Activity card ── */}
+      {newPostCount>0&&(
+        <button onClick={()=>{setNewPostCount(0);lastSeenIdRef.current=feedData?.events?.[0]?.id||null;}}
+          style={{width:"100%",padding:"8px",borderRadius:10,
+            background:`${V.accent}10`,border:`1px solid ${V.accent}30`,cursor:"pointer",
+            fontSize:11,fontWeight:700,color:V.accent,fontFamily:V.font,
+            display:"flex",alignItems:"center",justifyContent:"center",gap:6,
+            animation:"newPostPulse 1.5s ease-in-out infinite"}}>
+          <span style={{fontSize:14}}>✨</span>
+          {newPostCount} new post{newPostCount>1?"s":""} — tap to see
+        </button>
+      )}
+      <style>{`@keyframes newPostPulse{0%,100%{box-shadow:0 0 0 0 rgba(0,245,160,0.3)}50%{box-shadow:0 0 0 6px rgba(0,245,160,0)}}`}</style>
       {feedData?.events?.filter(e=>!e.isOwn).length>0&&(
         <Card style={{padding:14}}>
-          <div style={{fontSize:13,fontWeight:700,color:V.text,marginBottom:8}}>📡 Friend Activity</div>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+            <div style={{fontSize:13,fontWeight:700,color:V.text}}>📡 Friend Activity</div>
+            <button onClick={()=>loadFeed(false)}
+              style={{background:"none",border:"none",cursor:"pointer",
+                fontSize:9,color:V.text3,padding:"2px 6px",fontFamily:V.font}}>↻ refresh</button>
+          </div>
           {feedData.events.filter(e=>!e.isOwn).slice(0,8).map(ev=>(
             <div key={ev.id} style={{padding:"8px 0",borderBottom:`1px solid rgba(255,255,255,0.03)`}}>
               <div style={{display:"flex",justifyContent:"space-between"}}>
@@ -14227,60 +14803,138 @@ function useLevelUp(s){
 // ── Level-Up Celebration Overlay ──
 function LevelUpCelebration({rank,onDismiss,s}){
   const [show,setShow]=useState(false);
-  useEffect(()=>{setTimeout(()=>setShow(true),50);},[]);
+  const [phase,setPhase]=useState(0); // 0=burst 1=card
+  useEffect(()=>{setTimeout(()=>{setShow(true);setTimeout(()=>setPhase(1),600)},50);},[]);
   const dismiss=()=>{setShow(false);setTimeout(onDismiss,300);};
-  const {xp}=calcIronScore(s);
+  const {xp,rank:newRank,streak}=calcIronScore(s);
+  const prevRank=IRON_RANKS.find(r=>r.level===rank.level-1);
+  // Stats to show in celebration
+  const totalW=(s.workouts||[]).length;
+  const shields=getShields();
+  // Share card via canvas
+  const shareRankCard=async()=>{
+    try{
+      const stats=[
+        {value:rank.icon+" "+rank.name,label:"NEW RANK",color:rank.color},
+        {value:xp.toLocaleString(),label:"IRON XP",color:"#e8e8ec"},
+        {value:"Lv "+rank.level+"/30",label:"LEVEL",color:rank.tierColor},
+        {value:totalW+" workouts",label:"ALL TIME",color:"#94a3b8"},
+      ];
+      const c2=await ShareCard.generate(rank.icon+" RANK UP!",stats,`${rank.name} · Level ${rank.level} · ${xp.toLocaleString()} XP`);
+      ShareCard.share(c2,`ironlog-rankup-${today()}.png`);
+    }catch(e){
+      if(navigator.share)navigator.share({title:"IRONLOG Rank Up!",text:`Just hit ${rank.name} on IRONLOG 💪 ${xp.toLocaleString()} XP`}).catch(()=>{});
+    }
+  };
   return(
     <div style={{position:"fixed",inset:0,zIndex:200,display:"flex",flexDirection:"column",
-      alignItems:"center",justifyContent:"center",
-      background:`radial-gradient(ellipse at center,${rank.color}18 0%,rgba(0,0,0,0.92) 70%)`,
+      alignItems:"center",justifyContent:"center",overflowY:"auto",
+      background:`radial-gradient(ellipse at 50% 40%,${rank.color}22 0%,rgba(0,0,0,0.94) 65%)`,
       opacity:show?1:0,transition:"opacity .3s"}}>
-      {/* Animated particles */}
+      {/* ── T4 #7: Enhanced burst particles (40 vs 20) ── */}
       <div style={{position:"absolute",inset:0,overflow:"hidden",pointerEvents:"none"}}>
-        {Array.from({length:20}).map((_,i)=>{
-          const x=Math.random()*100,delay=Math.random()*1.5,dur=1.5+Math.random();
-          return <div key={i} style={{position:"absolute",left:`${x}%`,top:"-10px",
-            width:8,height:8,borderRadius:"50%",
-            background:i%3===0?rank.color:i%3===1?"#fff":rank.tierColor,
-            animation:`fall ${dur}s ${delay}s ease-in forwards`,opacity:0.8,
-            transform:`scale(${0.5+Math.random()})`}}/>;
+        {Array.from({length:40}).map((_,i)=>{
+          const x=5+Math.random()*90;
+          const sz=4+Math.random()*8;
+          const delay=Math.random()*2;
+          const dur=1.2+Math.random()*1.5;
+          const colors=[rank.color,rank.tierColor,"#fff","#fbbf24","#f43f5e",V.accent];
+          return <div key={i} style={{position:"absolute",
+            left:`${x}%`,top:"-12px",
+            width:sz,height:sz,borderRadius:i%4===0?"2px":"50%",
+            background:colors[i%colors.length],
+            animation:`fall ${dur}s ${delay}s ease-in forwards`,
+            opacity:0.9}}/>;
         })}
       </div>
-      <style>{`@keyframes fall{0%{transform:translateY(0) rotate(0deg);opacity:1}100%{transform:translateY(110vh) rotate(720deg);opacity:0}}`}</style>
-      {/* Main card */}
-      <div style={{position:"relative",zIndex:1,textAlign:"center",padding:"32px 28px",maxWidth:320,
-        background:`linear-gradient(135deg,${rank.color}18,rgba(0,0,0,0.8))`,
-        border:`2px solid ${rank.color}60`,borderRadius:24,
-        transform:show?"scale(1)":"scale(0.7)",transition:"transform .4s cubic-bezier(.17,.67,.35,1.3)"}}>
-        <div style={{fontSize:10,fontWeight:700,letterSpacing:3,color:rank.color,
-          textTransform:"uppercase",marginBottom:12,opacity:0.8}}>RANK UP!</div>
-        <div style={{fontSize:72,marginBottom:8,lineHeight:1,
-          filter:`drop-shadow(0 0 20px ${rank.color}80)`}}>{rank.icon}</div>
-        <div style={{fontSize:28,fontWeight:900,color:rank.color,marginBottom:4,lineHeight:1.1}}>
+      <style>{`
+        @keyframes fall{0%{transform:translateY(0) rotate(0deg) scale(1);opacity:1}100%{transform:translateY(110vh) rotate(${720+Math.round(Math.random()*360)}deg) scale(0.3);opacity:0}}
+        @keyframes rankPop{0%{transform:scale(0.5) rotate(-8deg);opacity:0}60%{transform:scale(1.08) rotate(2deg);opacity:1}100%{transform:scale(1) rotate(0deg);opacity:1}}
+        @keyframes rankShimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+        @keyframes rankGlow{0%,100%{box-shadow:0 0 20px ${rank.color}40}50%{box-shadow:0 0 50px ${rank.color}80,0 0 80px ${rank.color}30}}
+      `}</style>
+
+      {/* ── Rank-up main card ── */}
+      <div style={{position:"relative",zIndex:1,width:"min(340px,92vw)",margin:"auto",
+        padding:"28px 24px 24px",textAlign:"center",
+        background:`linear-gradient(160deg,${rank.color}20,rgba(10,10,15,0.95) 60%)`,
+        border:`2px solid ${rank.color}70`,borderRadius:28,
+        animation:phase>=1?"rankPop .5s cubic-bezier(.17,.67,.35,1.3) forwards":"none",
+        opacity:phase>=1?undefined:0}}>
+
+        {/* Tier badge */}
+        <div style={{display:"inline-flex",alignItems:"center",gap:5,padding:"3px 10px",
+          borderRadius:20,background:`${rank.tierColor}18`,border:`1px solid ${rank.tierColor}35`,
+          marginBottom:14}}>
+          <span style={{fontSize:9,fontWeight:700,letterSpacing:2,color:rank.tierColor,textTransform:"uppercase"}}>
+            {rank.tier} TIER
+          </span>
+        </div>
+
+        {/* Big icon with glow ring */}
+        <div style={{position:"relative",display:"inline-block",marginBottom:12}}>
+          <div style={{width:110,height:110,borderRadius:"50%",margin:"0 auto",
+            background:`radial-gradient(circle,${rank.color}25,${rank.color}08)`,
+            border:`3px solid ${rank.color}60`,
+            display:"flex",alignItems:"center",justifyContent:"center",
+            animation:"rankGlow 2s ease-in-out infinite",
+            fontSize:58,lineHeight:1}}>{rank.icon}</div>
+          {prevRank&&(
+            <div style={{position:"absolute",bottom:-6,right:-6,
+              width:28,height:28,borderRadius:"50%",
+              background:V.bg,border:`2px solid ${rank.color}50`,
+              display:"flex",alignItems:"center",justifyContent:"center",
+              fontSize:14}}>{prevRank.icon}</div>
+          )}
+        </div>
+
+        <div style={{fontSize:9,fontWeight:700,letterSpacing:3,color:rank.color,
+          textTransform:"uppercase",opacity:0.8,marginBottom:6}}>RANK UP!</div>
+        <div style={{fontSize:30,fontWeight:900,color:rank.color,lineHeight:1.05,marginBottom:4}}>
           {rank.name}
         </div>
-        <div style={{fontSize:12,color:"rgba(255,255,255,0.5)",marginBottom:6}}>{rank.tier} Tier</div>
-        <div style={{fontSize:11,color:"rgba(255,255,255,0.4)",marginBottom:20,fontFamily:"monospace"}}>
-          {xp.toLocaleString()} Total XP
+        <div style={{fontSize:11,color:"rgba(255,255,255,0.4)",marginBottom:16,fontFamily:"monospace"}}>
+          Level {rank.level} of 30 · {xp.toLocaleString()} XP
         </div>
-        {/* Progress bar shimmer */}
-        <div style={{height:4,borderRadius:2,background:"rgba(255,255,255,0.08)",marginBottom:20,overflow:"hidden"}}>
-          <div style={{height:"100%",borderRadius:2,background:`linear-gradient(90deg,${rank.color},${rank.tierColor})`,
-            width:"100%",animation:"shimmer 1.5s ease-in-out infinite",backgroundSize:"200% 100%"}}/>
+
+        {/* Shimmer bar */}
+        <div style={{height:5,borderRadius:3,background:"rgba(255,255,255,0.07)",marginBottom:16,overflow:"hidden"}}>
+          <div style={{height:"100%",borderRadius:3,
+            background:`linear-gradient(90deg,${rank.color}00,${rank.color},${rank.tierColor},${rank.color}00)`,
+            backgroundSize:"200% 100%",animation:"rankShimmer 1.8s ease-in-out infinite"}}/>
         </div>
-        <style>{`@keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}`}</style>
+
+        {/* Stats row */}
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:18}}>
+          {[
+            {icon:"💪",val:totalW,label:"workouts"},
+            {icon:"🔥",val:streak+"d",label:"streak"},
+            {icon:"🛡️",val:shields,label:"shields"},
+          ].map(stat=>(
+            <div key={stat.label} style={{padding:"8px 6px",borderRadius:10,
+              background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.07)"}}>
+              <div style={{fontSize:9,marginBottom:2}}>{stat.icon}</div>
+              <div style={{fontSize:15,fontWeight:800,color:V.text,fontFamily:V.mono,lineHeight:1}}>{stat.val}</div>
+              <div style={{fontSize:8,color:V.text3,marginTop:2}}>{stat.label}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Action buttons */}
         <div style={{display:"flex",gap:8}}>
-          <button onClick={()=>{
-            if(navigator.share)navigator.share({title:"IRONLOG Rank Up!",text:`I just reached ${rank.name} on IRONLOG! 💪 ${xp.toLocaleString()} XP`});
-            else{navigator.clipboard?.writeText(`I just reached ${rank.name} on IRONLOG! 💪 ${xp.toLocaleString()} XP`);SuccessToastCtrl.show("Copied!");}
-          }} style={{flex:1,padding:"12px",borderRadius:12,background:`${rank.color}20`,
-            border:`1px solid ${rank.color}40`,cursor:"pointer",
-            fontSize:12,fontWeight:700,color:rank.color,fontFamily:V.font}}>
-            Share 🔗
+          <button onClick={shareRankCard}
+            style={{flex:1,padding:"11px",borderRadius:12,
+              background:`${rank.color}15`,border:`1.5px solid ${rank.color}40`,
+              cursor:"pointer",fontSize:11,fontWeight:700,color:rank.color,fontFamily:V.font,
+              display:"flex",alignItems:"center",justifyContent:"center",gap:5}}>
+            📤 Share
           </button>
-          <button onClick={dismiss} style={{flex:1,padding:"12px",borderRadius:12,
-            background:rank.color,border:"none",cursor:"pointer",
-            fontSize:12,fontWeight:800,color:V.bg,fontFamily:V.font}}>
+          <button onClick={dismiss}
+            style={{flex:2,padding:"11px",borderRadius:12,
+              background:`linear-gradient(135deg,${rank.color},${rank.tierColor})`,
+              border:"none",cursor:"pointer",
+              fontSize:13,fontWeight:900,color:V.bg,fontFamily:V.font,
+              boxShadow:`0 4px 20px ${rank.color}50`}}>
             Let's Go! 💪
           </button>
         </div>
@@ -14424,6 +15078,76 @@ function RankBadge({rank,size}){
   );
 }
 
+// ── Milestone Checker — fires on workout/PR save ──
+function checkMilestones(s, newWorkout, newPRs) {
+  const totalWorkouts = (s.workouts||[]).length + 1; // +1 for the one just saved
+  const milestoneKey = "ft-milestones-fired";
+  const fired = LS.get(milestoneKey) || {};
+  const toFire = [];
+
+  // Workout count milestones
+  const wMilestones = [1,10,25,50,100,200,365,500];
+  wMilestones.forEach(n => {
+    if(totalWorkouts === n && !fired["w_"+n]) {
+      fired["w_"+n] = true;
+      const labels = {1:"First workout logged! The journey begins.",10:"10 workouts down! You're building a habit.",
+        25:"25 sessions! You're consistent now.",50:"50 workouts! That's real dedication.",
+        100:"💯 100 workouts! You're an IRONLOG legend.",200:"200 sessions. Elite consistency.",
+        365:"365 workouts — a year of training! Incredible.",500:"500 workouts. You are the definition of dedicated."};
+      toFire.push({icon:n>=100?"🏆":"💪",title:`${n} Workouts!`,msg:labels[n]||`${n} workouts logged!`,color:"#00f5a0"});
+    }
+  });
+
+  // Round number PR milestones (bench/squat/deadlift hitting 100/200/300/400/500)
+  (newPRs||[]).forEach(pr => {
+    const w = parseFloat(pr.weight)||0;
+    [100,135,185,225,275,315,365,405,455,495].forEach(milestone => {
+      const key = "pr_"+pr.name.replace(/\s/g,"_")+"_"+milestone;
+      if(w >= milestone && !fired[key]) {
+        // Check they didn't already have this PR before
+        const hadBefore = (s.workouts||[]).some(wo => wo.exercises.some(e =>
+          s.exercises?.find(x=>x.id===e.exerciseId)?.name===pr.name &&
+          e.sets.some(st => parseFloat(st.weight)||0 >= milestone)
+        ));
+        if(!hadBefore) {
+          fired[key] = true;
+          toFire.push({icon:"🎯",title:`${pr.name} ${milestone}!`,
+            msg:`You just ${w > milestone ? "passed" : "hit"} ${milestone} lbs on ${pr.name}. New milestone unlocked!`,
+            color:"#f59e0b"});
+        }
+      }
+    });
+  });
+
+  // Streak milestones
+  const streak = (s.workouts||[]).filter(w => {
+    // rough streak from saved workouts including today
+    return true;
+  }).length; // simplified — use workout count as proxy
+  const streakMilestones = [7,14,30,60,100];
+  const actualStreak = (()=>{let c=0,i=0;while((s.workouts||[]).some(w=>w.date===ago(i))||i===0){if((s.workouts||[]).some(w=>w.date===ago(i))||newWorkout?.date===ago(0))c++;else break;i++;}return c;})();
+  streakMilestones.forEach(n => {
+    if(actualStreak >= n && !fired["streak_"+n]) {
+      fired["streak_"+n] = true;
+      const streakMsgs = {7:"7-day streak! A whole week of consistency.",14:"14 days! Two full weeks — keep it going.",
+        30:"🔥 30-day streak! You're unstoppable.",60:"60 days straight. That's elite.",100:"💯 100-day streak. You are legendary."};
+      toFire.push({icon:"🔥",title:`${n}-Day Streak!`,msg:streakMsgs[n]||`${n} days in a row!`,color:"#f97316"});
+    }
+  });
+
+  if(toFire.length > 0) {
+    LS.set(milestoneKey, fired);
+    // Show milestones sequentially
+    toFire.forEach((m, i) => {
+      setTimeout(() => {
+        SuccessToastCtrl.show(`${m.icon} ${m.title} — ${m.msg}`);
+        // Also award bonus XP for milestone
+        addXPBonus(50, m.title);
+      }, i * 2200);
+    });
+  }
+}
+
 // ═══════════════════════════════════════════════════════════════════
 // DAILY XP MISSIONS
 // 20-mission pool, seed-based rotation, 3 per day, refreshes midnight
@@ -14507,6 +15231,39 @@ const MISSION_POOL=[
     check:(s)=>(s.checkins||[]).some(c=>c.date===today()&&(c.note||c.notes))},
   {id:"m_bodycomp",   icon:"📏",title:"Body Scan",        desc:"Log any body measurement today",       xp:25, cat:"habits",
     check:(s)=>(s.body||[]).some(b=>b.date===today())},
+  // ── 8 New Missions (Tier 2 expansion) ──
+  {id:"m_dm",         icon:"💬",title:"Reach Out",        desc:"Send a message to a friend today",      xp:20, cat:"social",
+    check:(_s)=>LS.get("ft-dm-sent-today")===today()},
+  {id:"m_60min",      icon:"⏱️",title:"Marathon Session",  desc:"Log a workout 60+ minutes long",        xp:50, cat:"workout",
+    check:(s)=>{const w=s.workouts.find(w=>w.date===today());return w&&parseInt(w.dur||0)>=60;}},
+  {id:"m_4meals",     icon:"🍽️",title:"Meal Tracker Pro",  desc:"Log all 4 meal slots today",            xp:40, cat:"nutrition",
+    check:(s)=>{const w=s.nutrition.find(n=>n.date===today());return(w?.meals||[]).length>=4;}},
+  {id:"m_cardio",     icon:"🏃",title:"Cardio Day",        desc:"Log a cardio or conditioning workout",  xp:35, cat:"workout",
+    check:(s)=>{const w=s.workouts.find(w=>w.date===today());if(!w)return false;
+      const hasCardio=w.exercises?.some(e=>{const n=(s.exercises.find(x=>x.id===e.exerciseId)?.name||"").toLowerCase();return n.includes("cardio")||n.includes("run")||n.includes("bike")||n.includes("row")||n.includes("jump")||e.exerciseId==="cardio";});
+      const isCatCardio=w.exercises?.some(e=>s.exercises.find(x=>x.id===e.exerciseId)?.cat==="Cardio");
+      return hasCardio||isCatCardio;}},
+  {id:"m_beat_last",  icon:"📈",title:"Beat Last Time",    desc:"Log a heavier set than your last session",xp:55,cat:"workout",
+    check:(s)=>{const todayW=s.workouts.find(w=>w.date===today());if(!todayW)return false;
+      return todayW.exercises.some(e=>{
+        const prevW=s.workouts.find(w=>w.date<today()&&w.exercises.some(ex=>ex.exerciseId===e.exerciseId));
+        if(!prevW)return false;
+        const prevEx=prevW.exercises.find(ex=>ex.exerciseId===e.exerciseId);
+        const prevMax=Math.max(...(prevEx?.sets||[]).map(st=>parseFloat(st.weight)||0));
+        const todayMax=Math.max(...e.sets.map(st=>parseFloat(st.weight)||0));
+        return todayMax>prevMax&&prevMax>0;});}},
+  {id:"m_early_bird", icon:"🌅",title:"Early Bird",        desc:"Log a workout before 8am",              xp:45, cat:"workout",
+    check:(s)=>{const w=s.workouts.find(w=>w.date===today());if(!w)return false;
+      const flag=LS.get("ft-workout-early-"+today());
+      return flag===true||flag==="true";}},
+  {id:"m_sleep9",     icon:"😴",title:"Sleep Champion",    desc:"Log 9+ hours of sleep",                 xp:30, cat:"habits",
+    check:(s)=>s.nutrition.filter(n=>n.date===today()).some(n=>(parseFloat(n.sleep)||0)>=9)||
+      (s.checkins||[]).some(c=>c.date===today()&&(parseFloat(c.sleep)||0)>=9)},
+  {id:"m_challenge",  icon:"🏆",title:"Challenge Mode",   desc:"Make progress on a weekly challenge",    xp:35, cat:"social",
+    check:(s)=>{
+      const weekW=s.workouts.filter(w=>w.date>=ago(7)).length;
+      const protDays=s.nutrition.filter(n=>n.date>=ago(7)&&(n.protein||0)>=(s.goals?.protein||150)).length;
+      return weekW>=2||protDays>=3;}},
 ];
 
 function getDailyMissions(dateStr){
@@ -14805,6 +15562,81 @@ function SocialIronScore({s,d}){
 
       <IronScoreCard s={s} showShields/>
 
+      {/* ── FEATURE #6: Weekly XP Momentum ── */}
+      {(()=>{
+        const bonusLog=(getXPBonus().log||[]);
+        // Build 7-day XP bar data
+        const days=Array.from({length:7}).map((_,i)=>{
+          const date=ago(6-i);
+          const dayBonus=bonusLog.filter(e=>e.date===date).reduce((a,e)=>a+(e.amount||0),0);
+          const dayBase=(s.workouts||[]).filter(w=>w.date===date).length*30;
+          return{date,xp:dayBase+dayBonus,worked:(s.workouts||[]).some(w=>w.date===date)};
+        });
+        const weekXP=days.reduce((a,d)=>a+d.xp,0);
+        const prevWeekXP=(()=>{
+          const prevLog=bonusLog.filter(e=>e.date>=ago(14)&&e.date<ago(7));
+          const prevBase=(s.workouts||[]).filter(w=>w.date>=ago(14)&&w.date<ago(7)).length*30;
+          return prevLog.reduce((a,e)=>a+(e.amount||0),0)+prevBase;
+        })();
+        const diff=prevWeekXP>0?Math.round((weekXP-prevWeekXP)/prevWeekXP*100):null;
+        const maxXP=Math.max(...days.map(d=>d.xp),1);
+        const dayLabels=["Su","Mo","Tu","We","Th","Fr","Sa"];
+        return(
+          <Card style={{padding:14}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+              <div>
+                <div style={{fontSize:11,fontWeight:700,color:V.text3,textTransform:"uppercase",letterSpacing:".06em"}}>This Week</div>
+                <div style={{display:"flex",alignItems:"baseline",gap:6,marginTop:2}}>
+                  <span style={{fontSize:22,fontWeight:900,color:V.accent,fontFamily:V.mono}}>+{weekXP.toLocaleString()}</span>
+                  <span style={{fontSize:11,color:V.text3}}>XP</span>
+                  {diff!==null&&(
+                    <span style={{fontSize:10,fontWeight:700,padding:"1px 6px",borderRadius:5,
+                      background:diff>=0?"rgba(0,245,160,0.1)":"rgba(255,107,107,0.1)",
+                      color:diff>=0?V.accent:V.danger}}>
+                      {diff>=0?"↑":"↓"}{Math.abs(diff)}% vs last week
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div style={{fontSize:10,color:V.text3,textAlign:"right"}}>
+                <div style={{fontFamily:V.mono,fontWeight:700,color:V.purple}}>{xp.toLocaleString()} total</div>
+                <div>all time</div>
+              </div>
+            </div>
+            {/* 7-day XP sparkline bars */}
+            <div style={{display:"flex",gap:4,alignItems:"flex-end",height:48}}>
+              {days.map((day,i)=>{
+                const h=day.xp>0?Math.max(6,Math.round((day.xp/maxXP)*48)):4;
+                const isToday=day.date===today();
+                return(
+                  <div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
+                    <div style={{width:"100%",height:h,borderRadius:3,
+                      background:isToday?V.accent:day.worked?"rgba(0,245,160,0.4)":"rgba(255,255,255,0.06)",
+                      transition:"height .3s ease",boxShadow:isToday?`0 0 6px ${V.accent}60`:"none"}}/>
+                    <div style={{fontSize:7,color:isToday?V.accent:V.text3,fontWeight:isToday?700:400}}>
+                      {dayLabels[new Date(day.date+"T12:00:00").getDay()]}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            {/* XP recent activity log */}
+            {bonusLog.slice(0,4).length>0&&(
+              <div style={{marginTop:10,borderTop:"1px solid rgba(255,255,255,0.05)",paddingTop:8}}>
+                <div style={{fontSize:9,fontWeight:700,color:V.text3,textTransform:"uppercase",marginBottom:6}}>Recent XP</div>
+                {bonusLog.slice(0,4).map((e,i)=>(
+                  <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"3px 0",
+                    borderBottom:"1px solid rgba(255,255,255,0.03)"}}>
+                    <span style={{fontSize:10,color:V.text2}}>{e.reason}</span>
+                    <span style={{fontSize:10,fontWeight:700,color:V.accent,fontFamily:V.mono}}>+{e.amount}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+        );
+      })()}
+
       {/* Share rank card */}
       <button onClick={async()=>{
         const {xp,rank}=calcIronScore(s);
@@ -15003,6 +15835,74 @@ function SocialDuels({s,d}){
           background:V.accent,border:"none",cursor:"pointer",fontSize:12,fontWeight:800,
           color:V.bg,fontFamily:V.font}}>+ Challenge</button>
       </div>
+
+      {/* ── T4 #15: Weekly Wars winner announcement ── */}
+      {(()=>{
+        const endedDuels=active.filter(duel=>{
+          const msLeft=new Date(duel.endDate)-new Date();
+          return msLeft<0&&!duel.resultSeen;
+        });
+        if(endedDuels.length===0)return null;
+        return endedDuels.map(duel=>{
+          const myV=getMyVal(duel.metric,duel.startDate);
+          const theirV=duel.theirVal||0;
+          const iWon=myV>theirV;
+          const tied=myV===theirV;
+          const def=DUEL_METRICS.find(dm=>dm.id===duel.metric);
+          return(
+            <div key={duel.id+"_result"} style={{padding:"14px 16px",borderRadius:14,marginBottom:4,
+              background:iWon?"linear-gradient(135deg,rgba(0,245,160,0.1),rgba(0,245,160,0.03))"
+                :tied?"linear-gradient(135deg,rgba(245,158,11,0.1),rgba(245,158,11,0.03))"
+                :"linear-gradient(135deg,rgba(244,63,94,0.1),rgba(244,63,94,0.03))",
+              border:`1.5px solid ${iWon?V.accent:tied?V.warn:V.danger}30`}}>
+              <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+                <span style={{fontSize:28}}>{iWon?"🏆":tied?"🤝":"💀"}</span>
+                <div>
+                  <div style={{fontSize:13,fontWeight:900,color:iWon?V.accent:tied?V.warn:V.danger}}>
+                    {iWon?"You Won!":tied?"It's a Tie":"You Lost"}
+                  </div>
+                  <div style={{fontSize:10,color:V.text3}}>
+                    vs {duel.friendName} · {def?.label||duel.metric}
+                  </div>
+                </div>
+                {iWon&&<div style={{marginLeft:"auto",padding:"3px 10px",borderRadius:20,
+                  background:`${V.accent}15`,border:`1px solid ${V.accent}30`,
+                  fontSize:9,fontWeight:700,color:V.accent}}>+50 XP</div>}
+              </div>
+              <div style={{display:"flex",gap:10,marginBottom:10}}>
+                {[{label:"You",val:myV,color:iWon?V.accent:V.danger},{label:duel.friendName?.split(" ")[0]||"Them",val:theirV,color:iWon?V.danger:V.accent}].map(side=>(
+                  <div key={side.label} style={{flex:1,padding:"7px 10px",borderRadius:8,
+                    background:"rgba(255,255,255,0.03)",textAlign:"center"}}>
+                    <div style={{fontSize:16,fontWeight:800,color:side.color,fontFamily:V.mono}}>{side.val}</div>
+                    <div style={{fontSize:9,color:V.text3}}>{side.label}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{display:"flex",gap:6}}>
+                <button onClick={()=>{
+                  if(iWon)addXPBonus(50,"Duel Victory 🏆");
+                  const updated=active.map(d=>d.id===duel.id?{...d,resultSeen:true}:d);
+                  setActive(updated);LS.set("ft-duels",updated);
+                  if(iWon)SuccessToastCtrl.show("Victory! +50 XP 🏆");
+                }} style={{flex:1,padding:"8px",borderRadius:8,cursor:"pointer",
+                  background:iWon?V.accent:V.danger,border:"none",
+                  fontSize:11,fontWeight:800,color:V.bg,fontFamily:V.font}}>
+                  {iWon?"Claim Victory 🏆":"Dismiss"}
+                </button>
+                <button onClick={()=>{
+                  const msg=iWon?`I beat ${duel.friendName} on IRONLOG! ${myV} vs ${theirV} ${def?.label||""} 🏆`:`${duel.friendName} beat me on IRONLOG. Rematch time! ⚔️`;
+                  if(navigator.share)navigator.share({title:"IRONLOG Duel Result",text:msg}).catch(()=>{});
+                  else{navigator.clipboard?.writeText(msg);SuccessToastCtrl.show("Copied!");}
+                }} style={{padding:"8px 12px",borderRadius:8,cursor:"pointer",
+                  background:"rgba(255,255,255,0.04)",border:`1px solid ${V.cardBorder}`,
+                  fontSize:11,color:V.text2,fontFamily:V.font}}>
+                  Share
+                </button>
+              </div>
+            </div>
+          );
+        });
+      })()}
 
       {active.length===0&&!showNew&&(
         <Card style={{padding:30,textAlign:"center"}}>
@@ -15513,9 +16413,16 @@ function SectionGrid({title,items,d}){
         {items.map(item=>(
           <button key={item.id} onClick={()=>d({type:"TAB",tab:item.id})} style={{
             display:"flex",flexDirection:"column",alignItems:"flex-start",gap:8,padding:14,
-            background:"rgba(255,255,255,0.02)",border:`1px solid ${V.cardBorder}`,borderRadius:14,
-            cursor:"pointer",WebkitTapHighlightColor:"transparent",textAlign:"left",
+            background:"rgba(255,255,255,0.02)",border:`1px solid ${item.badge>0?item.color+"40":V.cardBorder}`,borderRadius:14,
+            cursor:"pointer",WebkitTapHighlightColor:"transparent",textAlign:"left",position:"relative",
           }}>
+            {item.badge>0&&(
+              <div style={{position:"absolute",top:10,right:10,minWidth:18,height:18,borderRadius:9,
+                background:V.danger,display:"flex",alignItems:"center",justifyContent:"center",
+                fontSize:9,fontWeight:800,color:"#fff",padding:"0 4px"}}>
+                {item.badge>99?"99+":item.badge}
+              </div>
+            )}
             <div style={{width:36,height:36,borderRadius:10,background:`${item.color}12`,
               display:"flex",alignItems:"center",justifyContent:"center"}}>
               {item.icon({size:17,color:item.color})}
@@ -17888,6 +18795,7 @@ function App(){
   const [guideStep,setGuideStep]=useState(LS.get("ft-guide-done")?-1:0);
   const [guideActive,setGuideActive]=useState(false);
   const [showFeatureHelp,setShowFeatureHelp]=useState(null);
+  const [showGlobalCheckin,setShowGlobalCheckin]=useState(false);
   const [showNotifPrompt,setShowNotifPrompt]=useState(false);
 
   // Activate guide after onboarding completes (check each render)
@@ -18022,6 +18930,19 @@ function App(){
           </span>
         </button>
         <div style={{display:"flex",gap:6,alignItems:"center"}}>
+          {/* Daily check-in chip */}
+          {(()=>{const ciDone=(s.checkins||[]).some(c=>c.date===today());return(
+            <button onClick={()=>setShowGlobalCheckin(true)} style={{
+              display:"flex",alignItems:"center",gap:4,padding:"5px 9px",borderRadius:8,
+              border:`1px solid ${ciDone?V.accent+"30":V.accent+"60"}`,
+              background:ciDone?`${V.accent}08`:`${V.accent}14`,
+              cursor:"pointer",WebkitTapHighlightColor:"transparent",
+              animation:ciDone?"none":"checkinPulse 2.5s ease-in-out infinite",
+            }}>
+              <span style={{fontSize:11}}>{ciDone?"✅":"🫀"}</span>
+              <span style={{fontSize:9,fontWeight:700,color:V.accent,letterSpacing:".03em"}}>{ciDone?"Done":"Check In"}</span>
+            </button>
+          );})()}
           <button onClick={()=>setShowFeatureHelp(activeParent)} aria-label="Show help"
             style={{width:28,height:28,borderRadius:8,background:"rgba(255,255,255,0.04)",
               border:`1px solid ${V.cardBorder}`,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>
@@ -18284,7 +19205,7 @@ function App(){
         {s.tab==="admin"&&isAdmin&&<AdminHub s={s} d={d}/>}
 
         {/* Social tab + sub-pages */}
-        {s.tab==="social"&&<SocialTab s={s} d={d}/>}
+        {s.tab==="social"&&<SocialTab s={s} d={d} unreadMsgCount={unreadMsgCount}/>}
         {s.tab==="social_feed"&&<div><SubBack to="social" label="Social"/><SocialFeed s={s} d={d}/></div>}
         {s.tab==="social_messages"&&<div><MessagesTab s={s} d={d}/></div>}
         {s.tab==="social_friends"&&<div><SubBack to="social" label="Social"/><SocialFriends s={s} d={d}/></div>}
@@ -18496,6 +19417,9 @@ function App(){
           </div>
         );
       })()}
+
+      {/* Global Check-in Modal */}
+      {showGlobalCheckin&&<CheckinModal s={s} d={d} onClose={()=>setShowGlobalCheckin(false)}/>}
 
       {/* Feature Help — "Show me how" bottom sheet */}
       {showFeatureHelp&&(()=>{
