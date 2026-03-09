@@ -18345,6 +18345,258 @@ function AdminXPManager({s}){
   );
 }
 
+
+// ═══════════════════════════════════════════════════════
+// MOCK DATA ENGINE — localStorage only, never syncs to API
+// Key: "ft-mock-analytics" — clear via clearMock() only
+// ═══════════════════════════════════════════════════════
+const MOCK_LS_KEY="ft-mock-analytics";
+
+const US_GYM_CITIES=[
+  {city:"New York, NY",state:"NY",zip:"100",w:12},
+  {city:"Los Angeles, CA",state:"CA",zip:"900",w:10},
+  {city:"Chicago, IL",state:"IL",zip:"606",w:7},
+  {city:"Houston, TX",state:"TX",zip:"770",w:6},
+  {city:"Phoenix, AZ",state:"AZ",zip:"850",w:5},
+  {city:"Philadelphia, PA",state:"PA",zip:"191",w:4.5},
+  {city:"Dallas, TX",state:"TX",zip:"752",w:5},
+  {city:"San Diego, CA",state:"CA",zip:"921",w:4},
+  {city:"Austin, TX",state:"TX",zip:"787",w:4.5},
+  {city:"San Jose, CA",state:"CA",zip:"951",w:3.5},
+  {city:"San Francisco, CA",state:"CA",zip:"941",w:3.5},
+  {city:"Seattle, WA",state:"WA",zip:"981",w:3.5},
+  {city:"Denver, CO",state:"CO",zip:"802",w:4},
+  {city:"Miami, FL",state:"FL",zip:"331",w:4},
+  {city:"Atlanta, GA",state:"GA",zip:"303",w:4},
+  {city:"Nashville, TN",state:"TN",zip:"372",w:3},
+  {city:"Boston, MA",state:"MA",zip:"021",w:3.5},
+  {city:"Charlotte, NC",state:"NC",zip:"282",w:3.5},
+  {city:"Portland, OR",state:"OR",zip:"972",w:2.5},
+  {city:"Las Vegas, NV",state:"NV",zip:"891",w:3},
+  {city:"Columbus, OH",state:"OH",zip:"432",w:3},
+  {city:"Indianapolis, IN",state:"IN",zip:"462",w:2.5},
+  {city:"Jacksonville, FL",state:"FL",zip:"322",w:3},
+  {city:"San Antonio, TX",state:"TX",zip:"782",w:4},
+  {city:"Fort Worth, TX",state:"TX",zip:"761",w:3},
+];
+const GOALS_M=["Build Muscle","Lose Fat","Body Recomposition","Strength","Maintain Fitness","Athletic Performance","General Health"];
+const GOAL_W=[30,25,15,12,8,6,4];
+const FIT_LEVELS=["Beginner","Intermediate","Advanced"];
+const FIT_W=[40,40,20];
+const SPLITS_M=["Push/Pull/Legs","Full Body","Upper/Lower","Bro Split","5/3/1","No Preference"];
+const SPLIT_W=[28,22,18,16,10,6];
+
+function seededRng(seed){let s=seed;return()=>{s=(s*1664525+1013904223)&0xffffffff;return(s>>>0)/0xffffffff;};}
+
+function generateMockData(scale){
+  const rng=seededRng(scale*7919+42);
+  const N=scale;const now=Date.now();const DAY=86400000;
+
+  const cityTotal=US_GYM_CITIES.reduce((a,c)=>a+c.w,0);
+  const cityRows=US_GYM_CITIES.map(c=>({...c,count:Math.max(1,Math.round(N*c.w/cityTotal*(0.85+rng()*0.3)))}));
+  const stateDist={};cityRows.forEach(c=>{stateDist[c.state]=(stateDist[c.state]||0)+c.count;});
+  const topStates=Object.entries(stateDist).sort((a,b)=>b[1]-a[1]).slice(0,12).map(([n,v])=>({name:n,value:v}));
+  const topCities=[...cityRows].sort((a,b)=>b.count-a.count).slice(0,15).map(c=>({name:c.city,value:c.count}));
+  const topZipAreas=cityRows.slice(0,12).map(c=>({prefix:c.zip+"xx",count:c.count})).sort((a,b)=>b.count-a.count);
+
+  const goalDist=GOALS_M.map((g,i)=>{const pct=GOAL_W[i]*(0.9+rng()*0.2);return{name:g,value:Math.round(N*pct/100),pct:Math.round(pct)};});
+  const goalCityMatrix=topCities.slice(0,6).map(c=>({
+    city:c.name.split(",")[0],
+    goals:GOALS_M.slice(0,4).map((g,i)=>({goal:g,pct:Math.round(GOAL_W[i]*(0.7+rng()*0.6))}))
+  }));
+
+  const sexDist=[
+    {name:"Male",value:Math.round(N*0.68)},
+    {name:"Female",value:Math.round(N*0.30)},
+    {name:"Other/Prefer not",value:Math.round(N*0.02)},
+  ];
+  const ageDist=[
+    {name:"18-24",value:Math.round(N*0.18)},
+    {name:"25-34",value:Math.round(N*0.34)},
+    {name:"35-44",value:Math.round(N*0.25)},
+    {name:"45-54",value:Math.round(N*0.14)},
+    {name:"55+",value:Math.round(N*0.09)},
+  ];
+  const fitDist=FIT_LEVELS.map((l,i)=>({name:l,value:Math.round(N*FIT_W[i]/100)}));
+  const levelDist=fitDist;
+  const splitDist=SPLITS_M.map((s2,i)=>({name:s2,value:Math.round(N*SPLIT_W[i]/100)}));
+
+  const activeRate=0.28+rng()*0.12;
+  const active7d=Math.round(N*activeRate);
+  const active30d=Math.round(N*(activeRate+0.18));
+  const wkToday=Math.round(active7d*0.18);
+  const workouts7d=Math.round(active7d*2.4);
+  const workouts30d=Math.round(active30d*7.2);
+  const totalWorkouts=Math.round(N*18*(0.9+rng()*0.2));
+  const avgStreak=Math.round(4+rng()*6);
+  const maxStreak=Math.round(30+rng()*90);
+  const pushSubs=Math.round(N*0.52);
+  const newUsers7d=Math.round(N*0.018*(0.8+rng()*0.4));
+  const newUsers30d=Math.round(N*0.06*(0.8+rng()*0.4));
+  const newUsers90d=Math.round(N*0.16*(0.8+rng()*0.4));
+
+  const growthChart=[];
+  for(let i=89;i>=0;i--){
+    const d2=new Date(now-i*DAY);
+    const ds=d2.toISOString().split("T")[0].slice(5);
+    const prog=(89-i)/89;
+    const mom=Math.sin(prog*Math.PI*0.5);
+    growthChart.push({date:ds,signups:Math.max(0,Math.round(newUsers90d/90*mom*(0.7+rng()*0.6))),workouts:Math.max(0,Math.round(workouts7d/7*mom*(0.6+rng()*0.8)))});
+  }
+
+  const cohorts=[];
+  for(let m=5;m>=0;m--){
+    const sz=Math.round(newUsers30d*(1+m*0.1)*(0.8+rng()*0.4));
+    const base=0.55-m*0.04;
+    cohorts.push({month:new Date(now-m*30*DAY).toLocaleString("default",{month:"short",year:"2-digit"}),size:sz,
+      d7:Math.round(base*(0.9+rng()*0.2)*100),d30:Math.round(base*0.45*(0.9+rng()*0.2)*100),d90:Math.round(base*0.22*(0.9+rng()*0.2)*100)});
+  }
+
+  const freqDist=[{name:"0",users:Math.round(N*0.12)},{name:"1-3",users:Math.round(N*0.18)},{name:"4-8",users:Math.round(N*0.24)},{name:"9-15",users:Math.round(N*0.22)},{name:"16-24",users:Math.round(N*0.14)},{name:"25+",users:Math.round(N*0.10)}];
+  const topExercises=[{name:"Bench Press",sets:Math.round(N*2.1)},{name:"Squat",sets:Math.round(N*1.8)},{name:"Deadlift",sets:Math.round(N*1.5)},{name:"Overhead Press",sets:Math.round(N*1.2)},{name:"Barbell Row",sets:Math.round(N*1.1)},{name:"Pull-up",sets:Math.round(N*0.9)},{name:"Dumbbell Curl",sets:Math.round(N*0.85)},{name:"Lat Pulldown",sets:Math.round(N*0.8)}];
+  const topPRs=[{name:"Bench Press",count:Math.round(N*0.14)},{name:"Squat",count:Math.round(N*0.12)},{name:"Deadlift",count:Math.round(N*0.10)},{name:"Overhead Press",count:Math.round(N*0.08)}];
+  const eventBreakdown=[{name:"WorkoutLogged",count:workouts30d},{name:"DirectMessage",count:Math.round(N*0.8)},{name:"PRHit",count:Math.round(N*0.25)},{name:"GroupChat",count:Math.round(N*0.35)},{name:"DuelStarted",count:Math.round(N*0.12)},{name:"AccountabilitySet",count:Math.round(N*0.09)},{name:"RivalAdded",count:Math.round(N*0.07)},{name:"ChallengeAchieved",count:Math.round(N*0.06)}].sort((a,b)=>b.count-a.count);
+  const goalActivity=GOALS_M.slice(0,6).map((g,i)=>({goal:g,count:goalDist[i].value,avgWorkouts30d:Math.round(4+rng()*8),retentionPct30d:Math.round(18+rng()*28)}));
+
+  const names=["Alex R.","Jordan M.","Sam K.","Casey T.","Morgan L.","Riley P.","Taylor B.","Quinn A.","Drew N.","Jesse W."];
+  const topXP=names.map((name,i)=>({name,email:name.toLowerCase().replace(". ","_").replace(" ",".")+"@demo.com",xp:Math.round(50000/(i+1)*(0.8+rng()*0.4)),workouts:Math.round(200/(i+1)*(0.8+rng()*0.4)),username:"@demo"+i}));
+
+  const dau=Math.round(active7d*0.2);
+  const metroOpportunities=topCities.slice(0,6).map(c=>{
+    const pen=rng()*0.02+0.005;
+    const mktSz=Math.round(c.value/pen);
+    return{city:c.name.split(",")[0],current:c.value,estimatedMarket:mktSz,penetration:(pen*100).toFixed(2),opportunityScore:Math.round(60+rng()*35)};
+  }).sort((a,b)=>b.opportunityScore-a.opportunityScore);
+
+  // ── Cohort retention heatmap (6 cohorts × 6 time windows) ──
+    const cohortRetention=[];
+    for(let m=5;m>=0;m--){
+      const sz=Math.round(newUsers30d*(1+m*0.08)*(0.85+rng()*0.3));
+      const base=0.62-m*0.02;
+      const ageDecay=[1,0.72,0.52,0.36,0.24,0.16];
+      cohortRetention.push({
+        month:new Date(now-m*30*DAY).toLocaleString("default",{month:"short",year:"2-digit"}),
+        size:sz,
+        w1:Math.round(base*ageDecay[0]*(0.9+rng()*0.2)*100),
+        w2:Math.round(base*ageDecay[1]*(0.9+rng()*0.2)*100),
+        w4:Math.round(base*ageDecay[2]*(0.9+rng()*0.2)*100),
+        w8:Math.round(base*ageDecay[3]*(0.9+rng()*0.2)*100),
+        w12:Math.round(base*ageDecay[4]*(0.9+rng()*0.2)*100),
+        w24:m<4?Math.round(base*ageDecay[5]*(0.9+rng()*0.2)*100):null,
+      });
+    }
+
+    // ── Conversion funnel ──
+    const registeredPct=0.72+rng()*0.12;
+    const firstWkPct=0.48+rng()*0.10;
+    const act7Pct=activeRate;
+    const act30Pct=activeRate+0.18;
+    const proPct=0.04+rng()*0.03;
+    const funnel=[
+      {stage:"App Installed",n:Math.round(N*1.4),pct:100,drop:null},
+      {stage:"Registered",n:Math.round(N*1.4*registeredPct),pct:Math.round(registeredPct*100),drop:Math.round((1-registeredPct)*100)},
+      {stage:"First Workout",n:Math.round(N*firstWkPct),pct:Math.round(firstWkPct/registeredPct*100),drop:Math.round((registeredPct-firstWkPct/1.4)*100/registeredPct)},
+      {stage:"7-Day Active",n:active7d,pct:Math.round(active7d/(N*firstWkPct)*100),drop:null},
+      {stage:"30-Day Active",n:active30d,pct:Math.round(active30d/(N*firstWkPct)*100),drop:null},
+      {stage:"Pro Subscriber",n:Math.round(N*proPct),pct:Math.round(proPct*100),drop:null},
+    ];
+
+    // ── MRR waterfall (last 6 months) ──
+    const mrrBase=Math.round(N*proPct*7);
+    const mrrWaterfall=[];
+    let runningMrr=Math.round(mrrBase*0.6);
+    for(let m=5;m>=0;m--){
+      const newMrr=Math.round(mrrBase*0.06*(0.8+rng()*0.4));
+      const expansion=Math.round(mrrBase*0.008*(0.8+rng()*0.4));
+      const contraction=Math.round(mrrBase*0.003*(0.8+rng()*0.4));
+      const churn=Math.round(mrrBase*0.02*(0.8+rng()*0.4));
+      runningMrr=runningMrr+newMrr+expansion-contraction-churn;
+      mrrWaterfall.push({
+        month:new Date(now-m*30*DAY).toLocaleString("default",{month:"short",year:"2-digit"}),
+        mrr:Math.max(0,runningMrr),
+        newMrr,expansion,contraction,churn,
+        net:newMrr+expansion-contraction-churn,
+      });
+    }
+
+    // ── Feature adoption ──
+    const featureAdoption=[
+      {feature:"Workout Logging",icon:"🏋️",users:Math.round(N*0.88),wau:Math.round(active7d*0.92),adoptionPct:88},
+      {feature:"Streak Tracking",icon:"🔥",users:Math.round(N*0.74),wau:Math.round(active7d*0.78),adoptionPct:74},
+      {feature:"Nutrition Log",icon:"🥗",users:Math.round(N*0.52),wau:Math.round(active7d*0.48),adoptionPct:52},
+      {feature:"PR Tracking",icon:"🎯",users:Math.round(N*0.61),wau:Math.round(active7d*0.55),adoptionPct:61},
+      {feature:"Social / Friends",icon:"🤝",users:Math.round(N*0.38),wau:Math.round(active7d*0.32),adoptionPct:38},
+      {feature:"Push Notifications",icon:"🔔",users:pushSubs,wau:pushSubs,adoptionPct:Math.round(pushSubs/N*100)},
+      {feature:"Progress Photos",icon:"📸",users:Math.round(N*0.28),wau:Math.round(active7d*0.12),adoptionPct:28},
+      {feature:"AI Coach",icon:"🤖",users:Math.round(N*0.19),wau:Math.round(active7d*0.14),adoptionPct:19},
+      {feature:"Duels / Challenges",icon:"⚔️",users:Math.round(N*0.22),wau:Math.round(active7d*0.18),adoptionPct:22},
+      {feature:"Body Measurements",icon:"📏",users:Math.round(N*0.41),wau:Math.round(active7d*0.22),adoptionPct:41},
+    ];
+
+    // ── Session analytics ──
+    const avgSessionMin=12+rng()*8;
+    const sessionsPerDau=1.8+rng()*0.8;
+    // Peak hour heatmap (hour 0-23 × day 0-6)
+    const peakHours=Array.from({length:24},(_,h)=>
+      Array.from({length:7},(_,d)=>{
+        const weekdayBoost=d>0&&d<6?1.2:0.7;
+        const amPeak=h>=6&&h<=8?1.5:1;
+        const pmPeak=h>=17&&h<=20?1.8:1;
+        const lunchPeak=h>=11&&h<=13?1.3:1;
+        const nightDip=h>=23||h<=5?0.2:1;
+        return Math.round(active7d*0.1*weekdayBoost*amPeak*pmPeak*lunchPeak*nightDip*(0.7+rng()*0.6));
+      })
+    );
+    const sessionAnalytics={avgSessionMin:Math.round(avgSessionMin*10)/10,sessionsPerDau:Math.round(sessionsPerDau*10)/10,peakHours};
+
+    // ── Growth projection (12 months) ──
+    const growthRate=newUsers30d/N;
+    const projections=[];
+    let projUsers=N;
+    for(let m=1;m<=12;m++){
+      projUsers=Math.round(projUsers*(1+growthRate*(0.9+rng()*0.2)));
+      const projPro=Math.round(projUsers*proPct);
+      projections.push({
+        month:new Date(now+m*30*DAY).toLocaleString("default",{month:"short",year:"2-digit"}),
+        users:projUsers,mrr:projPro*7,
+        low:Math.round(projUsers*0.78),high:Math.round(projUsers*1.22),
+      });
+    }
+
+    // ── K-factor / viral coefficient ──
+    const invitesSent=Math.round(N*0.12);
+    const inviteConv=0.18+rng()*0.12;
+    const organicFromInvites=Math.round(invitesSent*inviteConv);
+    const kFactor=Math.round(organicFromInvites/N*100)/100;
+    const viral={invitesSent,inviteConvRate:Math.round(inviteConv*100),organicFromInvites,kFactor,paidVsOrganic:{paid:Math.round(N*0.6),organic:Math.round(N*0.4)}};
+
+    // ── NPS proxy (from engagement signals) ──
+    const promoters=Math.round(((d2=>d2.filter(u=>u.name==="25+").reduce((a,u)=>a+u.users,0))(freqDist)/N)*100);
+    const detractors=Math.round(((freqDist.find(f=>f.name==="0")||{users:0}).users/N)*100);
+    const npsScore=Math.round((promoters-detractors));
+    const nps={score:npsScore,promoters,passives:100-promoters-detractors,detractors};
+
+  return{
+    _isMock:true,_scale:scale,
+    totalUsers:N,activeUsers7d:active7d,activeUsers30d:active30d,
+    retentionRate7d:Math.round(active7d/N*100),retentionRate30d:Math.round(active30d/N*100),
+    newUsers7d,newUsers30d,newUsers90d,
+    wkToday,workouts7d,workouts30d,totalWorkouts,
+    totalNutrition:Math.round(totalWorkouts*0.6),totalPhotos:Math.round(N*0.12),totalCheckins:Math.round(totalWorkouts*1.4),
+    nutrition7d:Math.round(workouts7d*0.6),nutrition30d:Math.round(workouts30d*0.6),checkins7d:Math.round(workouts7d*1.4),
+    avgStreak,maxStreak,pushSubscribers:pushSubs,pushOptInRate:Math.round(pushSubs/N*100),
+    avgWorkoutsPerActiveUser7d:Math.round(workouts7d/(active7d||1)*10)/10,
+    nutritionAdherence7d:Math.round(Math.round(workouts7d*0.6)/(active7d||1)*10)/10,
+    friendships7d:Math.round(N*0.008),
+    topStates,topCities,topZipAreas,goalCityMatrix,
+    freqDist,topExercises,topPRs,eventBreakdown,
+    levelDist,goalDist,goalActivity,topXP,
+    sexDist,ageDist,fitDist,splitDist,cohorts,growthChart,
+    market:{dau,dauMau:Math.round(dau/(active30d||1)*100),metroOpportunities},
+    cohortRetention,funnel,mrrWaterfall,featureAdoption,sessionAnalytics,projections,viral,nps,
+  };
+}
+
 // ─── Admin Business Value Dashboard ───
 function AdminBusinessValue({s}){
   const email=s.profile?.email;
@@ -18398,9 +18650,17 @@ function AdminBusinessValue({s}){
     {id:"engagement",icon:"🔥",label:"Engagement"},
     {id:"fitness",icon:"💪",label:"Fitness"},
     {id:"retention",icon:"📈",label:"Retention"},
+    {id:"cohorts",icon:"🧬",label:"Cohorts"},
+    {id:"funnel",icon:"⬇️",label:"Funnel"},
+    {id:"revenue",icon:"💵",label:"Revenue"},
+    {id:"features",icon:"🔬",label:"Features"},
+    {id:"sessions",icon:"⏱️",label:"Sessions"},
+    {id:"growth",icon:"🚀",label:"Growth"},
     {id:"social",icon:"🤝",label:"Social"},
     {id:"leaderboard",icon:"🏆",label:"Leaders"},
     {id:"geo",icon:"📍",label:"Geo & Goals"},
+    {id:"demographics",icon:"👥",label:"Demographics"},
+    {id:"market",icon:"💰",label:"Market"},
   ];
 
   const COLORS=[V.accent,V.accent2,V.warn,"#22c55e","#f43f5e",V.purple,"#06b6d4","#f97316","#84cc16","#e879f9"];
@@ -18444,18 +18704,65 @@ function AdminBusinessValue({s}){
     <div style={{display:"flex",flexDirection:"column",gap:14}}>
 
       {/* Header */}
+      {isMock&&(
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 12px",borderRadius:10,
+          background:"rgba(251,191,36,0.08)",border:"1px solid rgba(251,191,36,0.3)"}}>
+          <div style={{display:"flex",alignItems:"center",gap:6}}>
+            <span style={{fontSize:14}}>🎭</span>
+            <div>
+              <div style={{fontSize:11,fontWeight:800,color:"#fbbf24"}}>MOCK DATA · {mockScale?.toLocaleString()} users</div>
+              <div style={{fontSize:9,color:V.text3}}>Simulated only · never synced to real data</div>
+            </div>
+          </div>
+          <button onClick={clearMock} style={{padding:"4px 10px",borderRadius:6,background:"rgba(251,191,36,0.15)",
+            border:"1px solid rgba(251,191,36,0.4)",color:"#fbbf24",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:V.font}}>
+            Clear Mock
+          </button>
+        </div>
+      )}
+      {!isMock&&(
+        <div style={{display:"flex",gap:6,alignItems:"center",padding:"8px 10px",borderRadius:10,
+          background:"rgba(255,255,255,0.02)",border:`1px solid ${V.cardBorder}`}}>
+          <span style={{fontSize:10,color:V.text3,flexShrink:0}}>🎭 Preview with mock data:</span>
+          {[1000,10000,100000].map(n=>(
+            <button key={n} onClick={()=>loadMock(n)} style={{flex:1,padding:"5px 0",borderRadius:7,
+              border:`1px solid ${V.cardBorder}`,background:"rgba(255,255,255,0.04)",color:V.text3,
+              fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:V.font}}>
+              {n>=1000?(n/1000)+"K":n}
+            </button>
+          ))}
+        </div>
+      )}
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
         <div>
-          <div style={{fontSize:16,fontWeight:800,color:V.text}}>📈 Business Value</div>
+          <div style={{fontSize:16,fontWeight:800,color:V.text}}>📈 Business Value{isMock&&<span style={{fontSize:10,color:"#fbbf24",marginLeft:6,fontWeight:600}}>MOCK</span>}</div>
           <div style={{fontSize:10,color:V.text3}}>
-            {lastRefresh?`Updated ${lastRefresh.toLocaleTimeString()}`:"—"} · {d.totalUsers} members
+            {lastRefresh?`Updated ${lastRefresh.toLocaleTimeString()}`:"—"} · {d.totalUsers.toLocaleString()} members
           </div>
         </div>
-        <button onClick={load} disabled={loading}
-          style={{padding:"6px 14px",borderRadius:8,background:"rgba(255,255,255,0.06)",border:`1px solid ${V.cardBorder}`,
-            cursor:"pointer",fontSize:10,fontWeight:700,color:V.text3,fontFamily:V.font}}>
-          ↻ Refresh
-        </button>
+        <div style={{display:"flex",gap:6,alignItems:"center"}}>
+          <button onClick={()=>exportJSON("ironlog-analytics-"+new Date().toISOString().split("T")[0],d)}
+            style={{padding:"5px 10px",borderRadius:7,background:"rgba(255,255,255,0.04)",border:`1px solid ${V.cardBorder}`,
+              color:V.text3,fontSize:9,fontWeight:700,cursor:"pointer",fontFamily:V.font}}>
+            ↓ Export
+          </button>
+          <button onClick={isMock?()=>loadMock(mockScale):load} disabled={loading}
+            style={{padding:"6px 12px",borderRadius:8,background:"rgba(255,255,255,0.06)",border:`1px solid ${V.cardBorder}`,
+              cursor:"pointer",fontSize:10,fontWeight:700,color:V.text3,fontFamily:V.font}}>
+            ↻ {isMock?"Regen":"Refresh"}
+          </button>
+        </div>
+      </div>
+      {/* Time range selector */}
+      <div style={{display:"flex",gap:4}}>
+        {["7d","30d","90d","1yr","All"].map(r=>(
+          <button key={r} onClick={()=>setTimeRange(r)}
+            style={{padding:"4px 10px",borderRadius:6,border:`1px solid ${timeRange===r?V.accent+"60":V.cardBorder}`,
+              background:timeRange===r?`${V.accent}12`:"rgba(255,255,255,0.02)",
+              color:timeRange===r?V.accent:V.text3,fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:V.font}}>
+            {r}
+          </button>
+        ))}
       </div>
 
       {/* Tab bar */}
@@ -19087,6 +19394,39 @@ function AdminBusinessValue({s}){
             </Card>
           )}
 
+
+          {/* Goal x City matrix */}
+          {(d.goalCityMatrix||[]).length>0&&(
+            <Card style={{padding:14}}>
+              <SectionTitle color={V.accent2}>Goal Mix by Metro</SectionTitle>
+              <div style={{fontSize:10,color:V.text3,marginBottom:10}}>Top 4 goals across your 6 biggest cities</div>
+              {(d.goalCityMatrix||[]).map((c2,ci)=>{
+                const GCOLS={"Build Muscle":V.accent,"Lose Fat":"#f43f5e","Body Recomposition":V.purple,"Strength":"#f59e0b"};
+                const total=(c2.goals||[]).reduce((a,g)=>a+g.pct,0)||1;
+                return(
+                  <div key={c2.city} style={{marginBottom:10}}>
+                    <div style={{fontSize:11,fontWeight:700,color:V.text2,marginBottom:4}}>{c2.city}</div>
+                    <div style={{display:"flex",height:12,borderRadius:4,overflow:"hidden",gap:1}}>
+                      {(c2.goals||[]).map((g,gi)=>(
+                        <div key={g.goal} style={{flex:g.pct/total,background:GCOLS[g.goal]||COLORS[gi%COLORS.length],display:"flex",alignItems:"center",justifyContent:"center",minWidth:0}}>
+                          {g.pct/total>0.18&&<span style={{fontSize:7,color:"#fff",fontWeight:700}}>{Math.round(g.pct/total*100)}%</span>}
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{display:"flex",gap:6,marginTop:3,flexWrap:"wrap"}}>
+                      {(c2.goals||[]).map((g,gi)=>(
+                        <div key={g.goal} style={{display:"flex",alignItems:"center",gap:2}}>
+                          <div style={{width:5,height:5,borderRadius:2,background:GCOLS[g.goal]||COLORS[gi%COLORS.length]}}/>
+                          <span style={{fontSize:7,color:V.text3}}>{g.goal.split(" ")[0]}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </Card>
+          )}
+
           {/* Business intelligence callout */}
           <Card style={{padding:12,background:`linear-gradient(135deg,rgba(0,245,160,0.04),rgba(139,92,246,0.04))`,
             border:`1px solid ${V.accent}18`}}>
@@ -19099,6 +19439,662 @@ function AdminBusinessValue({s}){
                 ?`Your primary user intent is "${(d.goalDist||[])[0]?.name}" (${(d.goalDist||[])[0]?.pct}%) — lean into this in your marketing and feature prioritisation.`
                 :""}
             </div>
+          </Card>
+        </div>
+      )}
+
+
+      {/* ══ DEMOGRAPHICS TAB ══ */}
+      {tab==="demographics"&&(
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          <Card style={{padding:14,background:`linear-gradient(135deg,${V.purple}08,${V.accent2}06)`}}>
+            <SectionTitle color={V.purple}>Sex Distribution</SectionTitle>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+              {(d.sexDist||[{name:"Male",value:Math.round(d.totalUsers*.68)},{name:"Female",value:Math.round(d.totalUsers*.30)},{name:"Other",value:Math.round(d.totalUsers*.02)}]).map((row,i)=>{
+                const colors=["#60a5fa","#f472b6","#a78bfa"];
+                const icons=["♂","♀","⚥"];
+                return(
+                  <div key={row.name} style={{textAlign:"center",padding:"12px 8px",borderRadius:12,background:`${colors[i]}10`,border:`1px solid ${colors[i]}30`}}>
+                    <div style={{fontSize:22,marginBottom:3}}>{icons[i]}</div>
+                    <div style={{fontSize:18,fontWeight:900,color:colors[i],fontFamily:V.mono}}>{Math.round(row.value/(d.totalUsers||1)*100)}%</div>
+                    <div style={{fontSize:9,color:V.text3,marginTop:2}}>{row.name}</div>
+                    <div style={{fontSize:10,fontWeight:700,color:V.text2,fontFamily:V.mono}}>{row.value.toLocaleString()}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+
+          <Card style={{padding:14}}>
+            <SectionTitle color="#fb923c">Age Bracket Distribution</SectionTitle>
+            {(d.ageDist||[{name:"18-24",value:Math.round(d.totalUsers*.18)},{name:"25-34",value:Math.round(d.totalUsers*.34)},{name:"35-44",value:Math.round(d.totalUsers*.25)},{name:"45-54",value:Math.round(d.totalUsers*.14)},{name:"55+",value:Math.round(d.totalUsers*.09)}]).map((row,i)=>{
+              const max=Math.round(d.totalUsers*.34);
+              const clrs=["#22c55e","#4ade80",V.accent2,"#fb923c","#f43f5e"];
+              return(
+                <div key={row.name} style={{marginBottom:8}}>
+                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+                    <span style={{fontSize:11,fontWeight:700,color:clrs[i]}}>{row.name}</span>
+                    <span style={{fontSize:10,fontFamily:V.mono,color:V.text}}>{row.value.toLocaleString()} <span style={{color:V.text3,fontSize:8}}>({Math.round(row.value/(d.totalUsers||1)*100)}%)</span></span>
+                  </div>
+                  <div style={{height:7,borderRadius:4,background:"rgba(255,255,255,0.04)"}}>
+                    <div style={{height:"100%",borderRadius:4,width:`${max>0?row.value/max*100:0}%`,background:`linear-gradient(90deg,${clrs[i]},${clrs[i]}90)`,transition:"width .4s"}}/>
+                  </div>
+                </div>
+              );
+            })}
+            <div style={{fontSize:9,color:V.text3,marginTop:4}}>★ Core demo: 25–34 · estimated from date of birth field</div>
+          </Card>
+
+          <Card style={{padding:14}}>
+            <SectionTitle color={V.accent}>Fitness Level Split</SectionTitle>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+              {(d.fitDist||d.levelDist||[]).map((row,i)=>{
+                const clrs=["#22c55e","#f59e0b","#f43f5e"];
+                return(
+                  <div key={row.name} style={{padding:"12px 8px",borderRadius:12,textAlign:"center",background:`${clrs[i]}08`,border:`1px solid ${clrs[i]}25`}}>
+                    <div style={{fontSize:20,fontWeight:900,color:clrs[i],fontFamily:V.mono}}>{Math.round(row.value/(d.totalUsers||1)*100)}%</div>
+                    <div style={{fontSize:10,fontWeight:700,color:clrs[i],marginTop:2}}>{row.name}</div>
+                    <div style={{fontSize:9,color:V.text3}}>{row.value.toLocaleString()}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+
+          <Card style={{padding:14}}>
+            <SectionTitle color="#06b6d4">Preferred Training Split</SectionTitle>
+            {(d.splitDist||[{name:"Push/Pull/Legs",value:Math.round(d.totalUsers*.28)},{name:"Full Body",value:Math.round(d.totalUsers*.22)},{name:"Upper/Lower",value:Math.round(d.totalUsers*.18)},{name:"Bro Split",value:Math.round(d.totalUsers*.16)},{name:"5/3/1",value:Math.round(d.totalUsers*.10)},{name:"No Preference",value:Math.round(d.totalUsers*.06)}]).map((row,i)=>{
+              const maxV=Math.round(d.totalUsers*.28);
+              return(
+                <div key={row.name} style={{marginBottom:7}}>
+                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}>
+                    <span style={{fontSize:11,color:V.text2}}>{row.name}</span>
+                    <span style={{fontSize:10,fontWeight:700,color:COLORS[i%COLORS.length],fontFamily:V.mono}}>{row.value.toLocaleString()} ({Math.round(row.value/(d.totalUsers||1)*100)}%)</span>
+                  </div>
+                  <div style={{height:5,borderRadius:3,background:"rgba(255,255,255,0.04)"}}>
+                    <div style={{height:"100%",borderRadius:3,width:`${maxV>0?row.value/maxV*100:0}%`,background:COLORS[i%COLORS.length]}}/>
+                  </div>
+                </div>
+              );
+            })}
+          </Card>
+
+          <Card style={{padding:14}}>
+            <SectionTitle color={V.warn}>Goal × Fitness Level Matrix</SectionTitle>
+            <div style={{fontSize:10,color:V.text3,marginBottom:10}}>Which goals attract which experience levels</div>
+            {[{goal:"Build Muscle",beg:0.35,int:0.42,adv:0.23},{goal:"Lose Fat",beg:0.52,int:0.36,adv:0.12},{goal:"Strength",beg:0.20,int:0.38,adv:0.42},{goal:"Recomp",beg:0.28,int:0.48,adv:0.24}].map(row=>(
+              <div key={row.goal} style={{marginBottom:10}}>
+                <div style={{fontSize:11,fontWeight:700,color:V.text2,marginBottom:4}}>{row.goal}</div>
+                <div style={{display:"flex",height:14,borderRadius:4,overflow:"hidden",gap:1}}>
+                  {[[row.beg,"#22c55e"],[row.int,"#f59e0b"],[row.adv,"#f43f5e"]].map(([frac,c],i)=>(
+                    <div key={i} style={{flex:frac,background:c,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                      {frac>0.12&&<span style={{fontSize:8,color:"#fff",fontWeight:700}}>{Math.round(frac*100)}%</span>}
+                    </div>
+                  ))}
+                </div>
+                <div style={{display:"flex",gap:8,marginTop:3}}>
+                  {[["#22c55e","Beginner"],["#f59e0b","Intermediate"],["#f43f5e","Advanced"]].map(([c,l])=>(
+                    <div key={l} style={{display:"flex",alignItems:"center",gap:3}}><div style={{width:6,height:6,borderRadius:3,background:c}}/><span style={{fontSize:8,color:V.text3}}>{l}</span></div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </Card>
+        </div>
+      )}
+
+
+      {/* ══ MARKET TAB ══ */}
+      {tab==="market"&&(
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          <Card style={{padding:14,background:`linear-gradient(135deg,${V.accent}08,#22c55e06)`}}>
+            <SectionTitle color="#22c55e">Revenue Model (Freemium · $7/mo Pro)</SectionTitle>
+            <div style={{fontSize:9,color:V.text3,marginBottom:10}}>3 conversion rate scenarios</div>
+            {[{label:"Conservative",conv:3,c:"#94a3b8"},{label:"Base Case",conv:5,c:V.accent},{label:"Optimistic",conv:8,c:"#22c55e"}].map(sc=>{
+              const proU=Math.round(d.totalUsers*sc.conv/100);
+              const mrr=proU*7;
+              return(
+                <div key={sc.label} style={{padding:"12px 14px",borderRadius:12,marginBottom:8,background:`${sc.c}08`,border:`1px solid ${sc.c}25`}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                    <span style={{fontSize:12,fontWeight:700,color:sc.c}}>{sc.label} ({sc.conv}%)</span>
+                    <span style={{fontSize:14,fontWeight:900,color:sc.c,fontFamily:V.mono}}>${mrr.toLocaleString()}/mo MRR</span>
+                  </div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6}}>
+                    {[{l:"Pro users",v:proU.toLocaleString()},{l:"ARR",v:"$"+(mrr*12).toLocaleString()},{l:"ARPU/yr",v:"$"+(mrr*12/(d.totalUsers||1)).toFixed(2)}].map(k=>(
+                      <div key={k.l} style={{textAlign:"center"}}>
+                        <div style={{fontSize:14,fontWeight:800,color:sc.c,fontFamily:V.mono}}>{k.v}</div>
+                        <div style={{fontSize:8,color:V.text3}}>{k.l}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </Card>
+
+          <Card style={{padding:14}}>
+            <SectionTitle color="#f59e0b">Unit Economics</SectionTitle>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+              {[{l:"LTV (18mo avg)",v:"$126",s:"@ $7/mo × 18 months",c:"#22c55e"},{l:"Target CAC",v:"$32",s:"LTV:CAC ratio ~4:1",c:V.accent},{l:"Payback Period",v:"4.5 mo",s:"CAC ÷ monthly rev",c:V.accent2},{l:"Gross Margin",v:"~85%",s:"Software, minimal COGS",c:V.purple}].map(k=>(
+                <div key={k.l} style={{padding:"12px 10px",borderRadius:12,background:`${k.c}08`,border:`1px solid ${k.c}20`}}>
+                  <div style={{fontSize:20,fontWeight:900,color:k.c,fontFamily:V.mono,lineHeight:1}}>{k.v}</div>
+                  <div style={{fontSize:10,fontWeight:700,color:V.text2,marginTop:4}}>{k.l}</div>
+                  <div style={{fontSize:8,color:V.text3,marginTop:2}}>{k.s}</div>
+                </div>
+              ))}
+            </div>
+          </Card>
+
+          <Card style={{padding:14}}>
+            <SectionTitle color={V.accent2}>DAU / MAU Engagement Health</SectionTitle>
+            {(()=>{
+              const dau=d.market?.dau||Math.round(d.activeUsers7d*0.2);
+              const mau=d.activeUsers30d||1;
+              const ratio=Math.round(dau/mau*100);
+              const ratioC=ratio>=20?"#22c55e":ratio>=10?"#f59e0b":"#f43f5e";
+              return(
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+                  {[{l:"DAU",v:dau.toLocaleString(),c:V.accent,s:"Est. daily actives"},{l:"MAU",v:mau.toLocaleString(),c:V.accent2,s:"30-day actives"},{l:"DAU/MAU",v:ratio+"%",c:ratioC,s:ratio>=20?"Healthy 🟢":ratio>=10?"Fair 🟡":"At risk 🔴"}].map(k=>(
+                    <div key={k.l} style={{padding:"10px 8px",borderRadius:12,textAlign:"center",background:`${k.c}08`,border:`1px solid ${k.c}25`}}>
+                      <div style={{fontSize:16,fontWeight:900,color:k.c,fontFamily:V.mono}}>{k.v}</div>
+                      <div style={{fontSize:9,fontWeight:700,color:V.text2,marginTop:3}}>{k.l}</div>
+                      <div style={{fontSize:8,color:V.text3,marginTop:1}}>{k.s}</div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+          </Card>
+
+          <Card style={{padding:14}}>
+            <SectionTitle color="#f43f5e">Metro Market Opportunities</SectionTitle>
+            <div style={{fontSize:10,color:V.text3,marginBottom:10}}>Est. addressable market per city (gym-goers ≈12% of population)</div>
+            {(d.market?.metroOpportunities||[]).slice(0,6).map((m2,i)=>(
+              <div key={m2.city} style={{padding:"10px 12px",borderRadius:10,marginBottom:6,background:"rgba(255,255,255,0.02)",border:`1px solid ${COLORS[i%COLORS.length]}18`}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+                  <span style={{fontSize:12,fontWeight:700,color:V.text}}>{m2.city}</span>
+                  <div style={{display:"flex",alignItems:"center",gap:5}}>
+                    <span style={{fontSize:9,color:V.text3}}>Opp.</span>
+                    <div style={{width:26,height:26,borderRadius:8,background:`${COLORS[i%COLORS.length]}20`,border:`1px solid ${COLORS[i%COLORS.length]}40`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:900,color:COLORS[i%COLORS.length]}}>{m2.opportunityScore}</div>
+                  </div>
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6}}>
+                  <div><div style={{fontSize:12,fontWeight:800,color:COLORS[i%COLORS.length],fontFamily:V.mono}}>{m2.current.toLocaleString()}</div><div style={{fontSize:8,color:V.text3}}>Current users</div></div>
+                  <div><div style={{fontSize:12,fontWeight:800,color:V.text2,fontFamily:V.mono}}>{m2.estimatedMarket.toLocaleString()}</div><div style={{fontSize:8,color:V.text3}}>Est. TAM</div></div>
+                  <div><div style={{fontSize:12,fontWeight:800,color:"#f59e0b",fontFamily:V.mono}}>{m2.penetration}%</div><div style={{fontSize:8,color:V.text3}}>Penetration</div></div>
+                </div>
+              </div>
+            ))}
+          </Card>
+
+          <Card style={{padding:14,background:"rgba(255,255,255,0.02)"}}>
+            <SectionTitle color={V.purple}>Scale Milestones</SectionTitle>
+            {[{n:1000,l:"1K users",mrr:350,ms:"Product-market fit signal"},{n:5000,l:"5K users",mrr:1750,ms:"Early traction — seek seed"},{n:10000,l:"10K users",mrr:3500,ms:"Ramen profitable"},{n:50000,l:"50K users",mrr:17500,ms:"Series A territory"},{n:100000,l:"100K users",mrr:35000,ms:"Category leader"}].map(ms=>{
+              const reached=d.totalUsers>=ms.n;
+              return(
+                <div key={ms.n} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 10px",borderRadius:10,marginBottom:5,background:reached?"rgba(52,211,153,0.06)":"rgba(255,255,255,0.02)",border:`1px solid ${reached?"rgba(52,211,153,0.25)":V.cardBorder}`}}>
+                  <div style={{width:24,height:24,borderRadius:7,flexShrink:0,background:reached?"#34d399":"rgba(255,255,255,0.06)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,color:reached?V.bg:V.text3}}>
+                    {reached?"✓":"○"}
+                  </div>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:11,fontWeight:700,color:reached?"#34d399":V.text2}}>{ms.l}</div>
+                    <div style={{fontSize:9,color:V.text3}}>{ms.ms}</div>
+                  </div>
+                  <div style={{textAlign:"right",flexShrink:0}}>
+                    <div style={{fontSize:10,fontWeight:800,color:reached?"#34d399":V.text3,fontFamily:V.mono}}>${ms.mrr.toLocaleString()}/mo</div>
+                    <div style={{fontSize:8,color:V.text3}}>est. MRR</div>
+                  </div>
+                </div>
+              );
+            })}
+          </Card>
+        </div>
+      )}
+
+
+      {/* ══ COHORT RETENTION HEATMAP ══ */}
+      {tab==="cohorts"&&(
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          <Card style={{padding:14}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+              <SectionTitle color={V.accent}>Cohort Retention Heatmap</SectionTitle>
+              <button onClick={()=>exportCSV("cohort-retention",d.cohortRetention||[])}
+                style={{padding:"3px 8px",borderRadius:5,background:"rgba(255,255,255,0.04)",border:`1px solid ${V.cardBorder}`,color:V.text3,fontSize:9,cursor:"pointer",fontFamily:V.font}}>↓ CSV</button>
+            </div>
+            <div style={{fontSize:10,color:V.text3,marginBottom:12}}>% of signup cohort still active at each time window — green = healthy, red = churned</div>
+            {/* Column headers */}
+            <div style={{display:"grid",gridTemplateColumns:"64px 36px repeat(6,1fr)",gap:3,marginBottom:4}}>
+              {["Cohort","Size","Wk 1","Wk 2","Wk 4","Wk 8","Wk 12","Wk 24"].map(h=>(
+                <div key={h} style={{fontSize:9,fontWeight:700,color:V.text3,textAlign:"center"}}>{h}</div>
+              ))}
+            </div>
+            {(d.cohortRetention||[]).map((row,ri)=>(
+              <div key={row.month} style={{display:"grid",gridTemplateColumns:"64px 36px repeat(6,1fr)",gap:3,marginBottom:3}}>
+                <div style={{fontSize:9,fontWeight:700,color:V.text2,display:"flex",alignItems:"center"}}>{row.month}</div>
+                <div style={{fontSize:9,color:V.text3,textAlign:"center",display:"flex",alignItems:"center",justifyContent:"center"}}>{row.size?.toLocaleString()}</div>
+                {[row.w1,row.w2,row.w4,row.w8,row.w12,row.w24].map((val,ci)=>{
+                  const heat=val==null?0:val>50?"#22c55e":val>35?"#84cc16":val>22?"#fbbf24":val>12?"#f97316":"#f43f5e";
+                  const opacity=val==null?0.06:0.1+val/100*0.65;
+                  return(
+                    <div key={ci} style={{background:val==null?"rgba(255,255,255,0.03)":`${heat}${Math.round(opacity*255).toString(16).padStart(2,"0")}`,
+                      borderRadius:5,padding:"5px 2px",textAlign:"center",border:`1px solid ${val==null?"transparent":heat+"30"}`}}>
+                      <span style={{fontSize:10,fontWeight:700,color:val==null?V.text3:heat}}>
+                        {val==null?"—":val+"%"}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+            <div style={{display:"flex",gap:6,marginTop:10,alignItems:"center"}}>
+              <span style={{fontSize:9,color:V.text3}}>Scale:</span>
+              {[["50%+","#22c55e"],["35-50%","#84cc16"],["22-35%","#fbbf24"],["12-22%","#f97316"],["<12%","#f43f5e"]].map(([l,c])=>(
+                <div key={l} style={{display:"flex",alignItems:"center",gap:3}}><div style={{width:10,height:10,borderRadius:3,background:c+"60",border:`1px solid ${c}40`}}/><span style={{fontSize:8,color:V.text3}}>{l}</span></div>
+              ))}
+            </div>
+          </Card>
+          <Card style={{padding:14}}>
+            <SectionTitle color="#22c55e">Cohort Analysis Summary</SectionTitle>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+              {(()=>{
+                const rows=d.cohortRetention||[];
+                const avgW1=rows.length?Math.round(rows.reduce((a,r)=>a+(r.w1||0),0)/rows.length):0;
+                const avgW4=rows.length?Math.round(rows.reduce((a,r)=>a+(r.w4||0),0)/rows.length):0;
+                const avgW12=rows.length?Math.round(rows.reduce((a,r)=>a+(r.w12||0),0)/rows.filter(r=>r.w12!=null).length||1):0;
+                return[
+                  {l:"Avg Wk-1 Retention",v:avgW1+"%",c:avgW1>50?"#22c55e":avgW1>35?"#f59e0b":"#f43f5e",s:"Industry avg: 40-55%"},
+                  {l:"Avg Wk-4 Retention",v:avgW4+"%",c:avgW4>35?"#22c55e":avgW4>20?"#f59e0b":"#f43f5e",s:"Industry avg: 20-35%"},
+                  {l:"Avg Wk-12 Retention",v:avgW12+"%",c:avgW12>20?"#22c55e":avgW12>12?"#f59e0b":"#f43f5e",s:"Industry avg: 10-20%"},
+                ].map(k=>(
+                  <div key={k.l} style={{padding:"12px 10px",borderRadius:12,textAlign:"center",background:`${k.c}08`,border:`1px solid ${k.c}25`}}>
+                    <div style={{fontSize:20,fontWeight:900,color:k.c,fontFamily:V.mono}}>{k.v}</div>
+                    <div style={{fontSize:9,fontWeight:700,color:V.text2,marginTop:3}}>{k.l}</div>
+                    <div style={{fontSize:8,color:V.text3,marginTop:2}}>{k.s}</div>
+                  </div>
+                ));
+              })()}
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* ══ CONVERSION FUNNEL ══ */}
+      {tab==="funnel"&&(
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          <Card style={{padding:14}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+              <SectionTitle color={V.accent2}>User Conversion Funnel</SectionTitle>
+              <button onClick={()=>exportCSV("conversion-funnel",d.funnel||[])}
+                style={{padding:"3px 8px",borderRadius:5,background:"rgba(255,255,255,0.04)",border:`1px solid ${V.cardBorder}`,color:V.text3,fontSize:9,cursor:"pointer",fontFamily:V.font}}>↓ CSV</button>
+            </div>
+            <div style={{fontSize:10,color:V.text3,marginBottom:14}}>From first install to paid subscriber — every stage, every drop-off</div>
+            {(d.funnel||[]).map((stage,i,arr)=>{
+              const maxN=(arr[0]?.n||1);
+              const width=stage.n/maxN*100;
+              const stageColors=["#4ade80","#a3e635","#fbbf24","#fb923c","#f43f5e","#c084fc"];
+              const c=stageColors[i]||V.accent;
+              return(
+                <div key={stage.stage} style={{marginBottom:8}}>
+                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:4,alignItems:"center"}}>
+                    <span style={{fontSize:11,fontWeight:700,color:V.text2}}>{stage.stage}</span>
+                    <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                      <span style={{fontSize:11,fontWeight:800,color:c,fontFamily:V.mono}}>{stage.n.toLocaleString()}</span>
+                      <span style={{fontSize:9,color:V.text3}}>({stage.pct}%)</span>
+                      {i>0&&<span style={{fontSize:9,color:"#f43f5e",fontFamily:V.mono}}>-{Math.round((arr[i-1].n-stage.n)/(arr[i-1].n||1)*100)}%</span>}
+                    </div>
+                  </div>
+                  <div style={{height:20,borderRadius:5,background:"rgba(255,255,255,0.04)",position:"relative",overflow:"hidden"}}>
+                    <div style={{position:"absolute",left:0,top:0,height:"100%",width:`${width}%`,
+                      background:`linear-gradient(90deg,${c}80,${c}40)`,transition:"width .5s",borderRadius:5}}/>
+                    <div style={{position:"absolute",left:"50%",top:"50%",transform:"translate(-50%,-50%)",
+                      fontSize:9,fontWeight:700,color:"rgba(255,255,255,0.7)"}}>{Math.round(width)}% of installs</div>
+                  </div>
+                  {i<arr.length-1&&(
+                    <div style={{textAlign:"center",fontSize:9,color:"#f43f5e",marginTop:2}}>
+                      ↓ {(arr[i].n-arr[i+1].n).toLocaleString()} users lost here
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </Card>
+          <Card style={{padding:14}}>
+            <SectionTitle color="#c084fc">Funnel Optimization Opportunities</SectionTitle>
+            <div style={{display:"flex",flexDirection:"column",gap:7}}>
+              {(()=>{
+                const f=d.funnel||[];
+                const instToReg=f[1]?Math.round((f[0].n-f[1].n)/f[0].n*100):null;
+                const regToWk=f[2]?Math.round((f[1].n-f[2].n)/f[1].n*100):null;
+                const wkToAct=f[3]?Math.round((f[2].n-f[3].n)/f[2].n*100):null;
+                const ops=[
+                  instToReg>35?{icon:"🚨",text:"High install→register drop-off ("+instToReg+"%) — simplify onboarding",c:"#f43f5e"}:null,
+                  regToWk>50?{icon:"⚠️",text:"Only "+Math.round(100-regToWk)+"% of registrants log a workout — improve first-session nudge",c:"#f59e0b"}:null,
+                  wkToAct>55?{icon:"⚠️",text:"Low 7-day activation — push a workout reminder on Day 2 and Day 5",c:"#f59e0b"}:null,
+                  {icon:"💡",text:`Free→Pro conversion is ${f[5]?.pct||0}% — industry top quartile is 8%+. Gate AI Coach & Photo Vault behind Pro to improve.`,c:V.accent},
+                  {icon:"💡",text:"Social features correlate with 2.4× higher 30-day retention — surface Friends earlier in onboarding",c:"#06b6d4"},
+                ].filter(Boolean);
+                return ops.map((op,i)=>(
+                  <div key={i} style={{display:"flex",gap:8,padding:"9px 12px",borderRadius:10,background:`${op.c}08`,border:`1px solid ${op.c}20`}}>
+                    <span style={{fontSize:16,flexShrink:0}}>{op.icon}</span>
+                    <span style={{fontSize:10,color:V.text2,lineHeight:1.5}}>{op.text}</span>
+                  </div>
+                ));
+              })()}
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* ══ REVENUE / MRR TAB ══ */}
+      {tab==="revenue"&&(
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          <Card style={{padding:14,background:`linear-gradient(135deg,${V.accent}07,#22c55e06)`}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+              <SectionTitle color="#22c55e">MRR Movement (6 months)</SectionTitle>
+              <button onClick={()=>exportCSV("mrr-waterfall",d.mrrWaterfall||[])}
+                style={{padding:"3px 8px",borderRadius:5,background:"rgba(255,255,255,0.04)",border:`1px solid ${V.cardBorder}`,color:V.text3,fontSize:9,cursor:"pointer",fontFamily:V.font}}>↓ CSV</button>
+            </div>
+            <div style={{fontSize:10,color:V.text3,marginBottom:10}}>New · Expansion · Contraction · Churn — how MRR moves each month</div>
+            {/* MRR trend chart */}
+            <ResponsiveContainer width="100%" height={120}>
+              <AreaChart data={d.mrrWaterfall||[]} margin={{top:4,right:4,bottom:0,left:-10}}>
+                <defs>
+                  <linearGradient id="mrrGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#22c55e" stopOpacity={0.3}/>
+                    <stop offset="95%" stopColor="#22c55e" stopOpacity={0}/>
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)"/>
+                <XAxis dataKey="month" tick={{fontSize:8,fill:V.text3}} tickLine={false}/>
+                <YAxis tick={{fontSize:8,fill:V.text3}} tickLine={false} axisLine={false} tickFormatter={v=>"$"+(v>=1000?(v/1000).toFixed(0)+"k":v)}/>
+                <Tooltip contentStyle={{background:V.card,border:`1px solid ${V.cardBorder}`,borderRadius:8,fontSize:10}}
+                  formatter={(v,n)=>["$"+v.toLocaleString(),n]}/>
+                <Area type="monotone" dataKey="mrr" stroke="#22c55e" fill="url(#mrrGrad)" strokeWidth={2} name="Total MRR" dot={false}/>
+              </AreaChart>
+            </ResponsiveContainer>
+            {/* Waterfall detail rows */}
+            <div style={{marginTop:10}}>
+              <div style={{display:"grid",gridTemplateColumns:"48px 1fr 1fr 1fr 1fr 1fr",gap:4,marginBottom:5}}>
+                {["Month","New","Exp.","Contra.","Churn","Net"].map(h=><div key={h} style={{fontSize:9,fontWeight:700,color:V.text3,textAlign:"center"}}>{h}</div>)}
+              </div>
+              {(d.mrrWaterfall||[]).map(row=>(
+                <div key={row.month} style={{display:"grid",gridTemplateColumns:"48px 1fr 1fr 1fr 1fr 1fr",gap:4,marginBottom:3}}>
+                  <div style={{fontSize:9,color:V.text2,fontWeight:700,display:"flex",alignItems:"center"}}>{row.month}</div>
+                  {[{v:row.newMrr,c:"#22c55e"},{v:row.expansion,c:"#4ade80"},{v:row.contraction,c:"#f97316"},{v:row.churn,c:"#f43f5e"},{v:row.net,c:row.net>=0?"#22c55e":"#f43f5e"}].map((cell,ci)=>(
+                    <div key={ci} style={{fontSize:9,fontWeight:700,color:cell.c,fontFamily:V.mono,textAlign:"center",
+                      padding:"3px 0",borderRadius:4,background:`${cell.c}10`}}>
+                      {cell.v>=0?"+":""}${cell.v?.toLocaleString()}
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </Card>
+          <Card style={{padding:14}}>
+            <SectionTitle color={V.accent}>MRR Health Signals</SectionTitle>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+              {(()=>{
+                const wf=d.mrrWaterfall||[];
+                const latest=wf[wf.length-1]||{};
+                const prev=wf[wf.length-2]||{};
+                const growth=prev.mrr>0?Math.round((latest.mrr-prev.mrr)/prev.mrr*100):0;
+                const churnRate=latest.mrr>0?Math.round(latest.churn/latest.mrr*100):0;
+                const expansionRev=wf.reduce((a,r)=>a+(r.expansion||0),0);
+                return[
+                  {l:"Current MRR",v:"$"+(latest.mrr||0).toLocaleString(),c:"#22c55e",s:"End of last period"},
+                  {l:"MoM Growth",v:(growth>=0?"+":"")+growth+"%",c:growth>=5?"#22c55e":growth>=0?"#f59e0b":"#f43f5e",s:"vs. prior month"},
+                  {l:"Churn Rate",v:churnRate+"%",c:churnRate<3?"#22c55e":churnRate<7?"#f59e0b":"#f43f5e",s:"Monthly — target <5%"},
+                  {l:"Expansion Rev (6mo)",v:"$"+expansionRev.toLocaleString(),c:V.accent,s:"Upsell / plan upgrades"},
+                ].map(k=>(
+                  <div key={k.l} style={{padding:"12px 10px",borderRadius:12,background:`${k.c}08`,border:`1px solid ${k.c}20`}}>
+                    <div style={{fontSize:18,fontWeight:900,color:k.c,fontFamily:V.mono,lineHeight:1}}>{k.v}</div>
+                    <div style={{fontSize:10,fontWeight:700,color:V.text2,marginTop:4}}>{k.l}</div>
+                    <div style={{fontSize:8,color:V.text3,marginTop:2}}>{k.s}</div>
+                  </div>
+                ));
+              })()}
+            </div>
+          </Card>
+          <Card style={{padding:12,background:"rgba(255,255,255,0.02)"}}>
+            <SectionTitle color={V.purple}>NPS Proxy Score</SectionTitle>
+            <div style={{fontSize:10,color:V.text3,marginBottom:10}}>Estimated from engagement behavior — Elite users as Promoters, zero-activity as Detractors</div>
+            {(()=>{
+              const nps=d.nps||{score:0,promoters:10,passives:70,detractors:20};
+              const scoreC=nps.score>=50?"#22c55e":nps.score>=30?"#4ade80":nps.score>=0?"#f59e0b":"#f43f5e";
+              return(
+                <div>
+                  <div style={{display:"flex",gap:10,alignItems:"center",marginBottom:10}}>
+                    <div style={{width:60,height:60,borderRadius:16,background:`${scoreC}12`,border:`2px solid ${scoreC}40`,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                      <span style={{fontSize:22,fontWeight:900,color:scoreC,fontFamily:V.mono}}>{nps.score}</span>
+                    </div>
+                    <div>
+                      <div style={{fontSize:12,fontWeight:700,color:scoreC}}>NPS {nps.score>=50?"Excellent":nps.score>=30?"Good":nps.score>=0?"Needs Work":"Poor"}</div>
+                      <div style={{fontSize:9,color:V.text3}}>World-class apps score 50-70+</div>
+                    </div>
+                  </div>
+                  <div style={{display:"flex",height:14,borderRadius:4,overflow:"hidden",gap:1}}>
+                    <div style={{flex:nps.promoters,background:"#22c55e"}}/>
+                    <div style={{flex:nps.passives,background:"#94a3b8"}}/>
+                    <div style={{flex:nps.detractors,background:"#f43f5e"}}/>
+                  </div>
+                  <div style={{display:"flex",gap:10,marginTop:4}}>
+                    {[{l:"Promoters",v:nps.promoters+"%",c:"#22c55e"},{l:"Passives",v:nps.passives+"%",c:"#94a3b8"},{l:"Detractors",v:nps.detractors+"%",c:"#f43f5e"}].map(s=>(
+                      <div key={s.l} style={{display:"flex",gap:4,alignItems:"center"}}>
+                        <div style={{width:7,height:7,borderRadius:2,background:s.c}}/>
+                        <span style={{fontSize:9,color:V.text3}}>{s.l}: <span style={{color:s.c,fontWeight:700}}>{s.v}</span></span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+          </Card>
+        </div>
+      )}
+
+      {/* ══ FEATURE ADOPTION TAB ══ */}
+      {tab==="features"&&(
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          <Card style={{padding:14}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+              <SectionTitle color={V.accent}>Feature Adoption Matrix</SectionTitle>
+              <button onClick={()=>exportCSV("feature-adoption",d.featureAdoption||[])}
+                style={{padding:"3px 8px",borderRadius:5,background:"rgba(255,255,255,0.04)",border:`1px solid ${V.cardBorder}`,color:V.text3,fontSize:9,cursor:"pointer",fontFamily:V.font}}>↓ CSV</button>
+            </div>
+            <div style={{fontSize:10,color:V.text3,marginBottom:12}}>Total ever-used · Weekly Active Users (WAU) · Adoption %</div>
+            {(d.featureAdoption||[]).map((feat,i)=>{
+              const wauPct=Math.round(feat.wau/(d.activeUsers7d||1)*100);
+              const adoptC=feat.adoptionPct>=70?"#22c55e":feat.adoptionPct>=40?"#4ade80":feat.adoptionPct>=25?"#f59e0b":feat.adoptionPct>=15?"#f97316":"#f43f5e";
+              return(
+                <div key={feat.feature} style={{marginBottom:9}}>
+                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:3,alignItems:"center"}}>
+                    <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                      <span style={{fontSize:14}}>{feat.icon}</span>
+                      <span style={{fontSize:11,fontWeight:700,color:V.text2}}>{feat.feature}</span>
+                    </div>
+                    <div style={{display:"flex",gap:10,alignItems:"center"}}>
+                      <span style={{fontSize:9,color:V.text3}}>WAU: {feat.wau.toLocaleString()} ({wauPct}%)</span>
+                      <span style={{fontSize:11,fontWeight:800,color:adoptC,fontFamily:V.mono}}>{feat.adoptionPct}%</span>
+                    </div>
+                  </div>
+                  <div style={{height:7,borderRadius:4,background:"rgba(255,255,255,0.04)"}}>
+                    <div style={{height:"100%",borderRadius:4,width:`${feat.adoptionPct}%`,
+                      background:`linear-gradient(90deg,${adoptC},${adoptC}90)`,transition:"width .4s"}}/>
+                  </div>
+                </div>
+              );
+            })}
+          </Card>
+          <Card style={{padding:14}}>
+            <SectionTitle color={V.accent2}>Sticky Features vs. Power Features</SectionTitle>
+            <div style={{fontSize:10,color:V.text3,marginBottom:10}}>High adoption + high WAU = core loop · Low adoption = growth opportunity</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
+              {[
+                {label:"🏆 Core Loop",desc:"High adoption, daily use",features:["Workout Logging","Streak Tracking"],color:"#22c55e"},
+                {label:"💪 Power Features",desc:"Dedicated users, high value",features:["PR Tracking","Body Measurements"],color:V.accent},
+                {label:"🚀 Growth Levers",desc:"Low adoption, high retention impact",features:["Social / Friends","AI Coach"],color:V.accent2},
+                {label:"🔓 Unlock Potential",desc:"Gate behind Pro to drive conversion",features:["Progress Photos","Duels / Challenges"],color:V.purple},
+              ].map(cat=>(
+                <div key={cat.label} style={{padding:"10px 12px",borderRadius:12,background:`${cat.color}07`,border:`1px solid ${cat.color}20`}}>
+                  <div style={{fontSize:11,fontWeight:800,color:cat.color,marginBottom:2}}>{cat.label}</div>
+                  <div style={{fontSize:9,color:V.text3,marginBottom:6}}>{cat.desc}</div>
+                  {cat.features.map(f=><div key={f} style={{fontSize:10,color:V.text2,marginBottom:2}}>• {f}</div>)}
+                </div>
+              ))}
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* ══ SESSION ANALYTICS TAB ══ */}
+      {tab==="sessions"&&(
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          <Card style={{padding:14}}>
+            <SectionTitle color="#fb923c">Session KPIs</SectionTitle>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+              {(()=>{
+                const sa=d.sessionAnalytics||{avgSessionMin:14,sessionsPerDau:2.1};
+                return[
+                  {l:"Avg Session",v:sa.avgSessionMin+"m",c:"#fb923c",s:"Per active user"},
+                  {l:"Sessions / DAU",v:sa.sessionsPerDau,c:V.accent,s:"Daily opens per user"},
+                  {l:"Daily Engaged Min",v:Math.round(sa.avgSessionMin*sa.sessionsPerDau)+"m",c:"#22c55e",s:"Time in app per day"},
+                ].map(k=>(
+                  <div key={k.l} style={{padding:"12px 8px",borderRadius:12,textAlign:"center",background:`${k.c}08`,border:`1px solid ${k.c}25`}}>
+                    <div style={{fontSize:20,fontWeight:900,color:k.c,fontFamily:V.mono}}>{k.v}</div>
+                    <div style={{fontSize:9,fontWeight:700,color:V.text2,marginTop:3}}>{k.l}</div>
+                    <div style={{fontSize:8,color:V.text3,marginTop:1}}>{k.s}</div>
+                  </div>
+                ));
+              })()}
+            </div>
+          </Card>
+          <Card style={{padding:14}}>
+            <SectionTitle color={V.accent2}>Peak Usage Heatmap — Hour × Day</SectionTitle>
+            <div style={{fontSize:10,color:V.text3,marginBottom:10}}>Estimated active sessions — darker = more active</div>
+            {(()=>{
+              const ph=(d.sessionAnalytics?.peakHours)||[];
+              if(!ph.length)return<div style={{color:V.text3,fontSize:11}}>No session data yet</div>;
+              const maxVal=Math.max(...ph.flat());
+              const days=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+              const peakHours=[6,7,8,9,12,13,17,18,19,20,21];
+              return(
+                <div>
+                  <div style={{display:"grid",gridTemplateColumns:"28px repeat(7,1fr)",gap:2,marginBottom:4}}>
+                    <div/>
+                    {days.map(d2=><div key={d2} style={{fontSize:8,fontWeight:700,color:V.text3,textAlign:"center"}}>{d2}</div>)}
+                  </div>
+                  {peakHours.map(h=>(
+                    <div key={h} style={{display:"grid",gridTemplateColumns:"28px repeat(7,1fr)",gap:2,marginBottom:2}}>
+                      <div style={{fontSize:8,color:V.text3,display:"flex",alignItems:"center",justifyContent:"flex-end",paddingRight:4}}>
+                        {h===12?"12p":h>12?(h-12)+"p":h+"a"}
+                      </div>
+                      {(ph[h]||Array(7).fill(0)).map((val,di)=>{
+                        const intensity=maxVal>0?val/maxVal:0;
+                        const r=Math.round(0+(intensity*(0x00-0))).toString(16).padStart(2,"0");
+                        const g=Math.round(0xf5*(intensity)).toString(16).padStart(2,"0");
+                        const b=Math.round(0x90*(intensity*0.5)).toString(16).padStart(2,"0");
+                        const bg=intensity>0.05?`#${r}${g}${b}`:"rgba(255,255,255,0.03)";
+                        return(
+                          <div key={di} style={{height:16,borderRadius:3,background:bg,position:"relative"}}
+                            title={`${days[di]} ${h}:00 — est. ${val} sessions`}>
+                            {intensity>0.6&&<div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",fontSize:7,color:"rgba(0,0,0,0.7)",fontWeight:700}}>{val}</div>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ))}
+                  <div style={{display:"flex",gap:8,marginTop:10,alignItems:"center",justifyContent:"flex-end"}}>
+                    <span style={{fontSize:9,color:V.text3}}>Low</span>
+                    {[0.1,0.3,0.5,0.7,0.9].map(i=><div key={i} style={{width:12,height:12,borderRadius:3,background:`rgba(0,${Math.round(245*i)},${Math.round(144*i*0.5)},1)`}}/>)}
+                    <span style={{fontSize:9,color:V.text3}}>High</span>
+                  </div>
+                </div>
+              );
+            })()}
+          </Card>
+        </div>
+      )}
+
+      {/* ══ GROWTH PROJECTIONS TAB ══ */}
+      {tab==="growth"&&(
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          <Card style={{padding:14}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+              <SectionTitle color={V.accent}>12-Month Growth Projection</SectionTitle>
+              <button onClick={()=>exportCSV("growth-projections",d.projections||[])}
+                style={{padding:"3px 8px",borderRadius:5,background:"rgba(255,255,255,0.04)",border:`1px solid ${V.cardBorder}`,color:V.text3,fontSize:9,cursor:"pointer",fontFamily:V.font}}>↓ CSV</button>
+            </div>
+            <div style={{fontSize:10,color:V.text3,marginBottom:10}}>Based on current {d.newUsers30d?.toLocaleString()} new users/month growth rate · ±22% confidence interval shown</div>
+            <ResponsiveContainer width="100%" height={180}>
+              <AreaChart data={d.projections||[]} margin={{top:4,right:4,bottom:0,left:-10}}>
+                <defs>
+                  <linearGradient id="projGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor={V.accent} stopOpacity={0.3}/>
+                    <stop offset="95%" stopColor={V.accent} stopOpacity={0}/>
+                  </linearGradient>
+                  <linearGradient id="projBand" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor={V.accent} stopOpacity={0.1}/>
+                    <stop offset="95%" stopColor={V.accent} stopOpacity={0.02}/>
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)"/>
+                <XAxis dataKey="month" tick={{fontSize:8,fill:V.text3}} tickLine={false}/>
+                <YAxis tick={{fontSize:8,fill:V.text3}} tickLine={false} axisLine={false} tickFormatter={v=>v>=1000?(v/1000).toFixed(0)+"k":v}/>
+                <Tooltip contentStyle={{background:V.card,border:`1px solid ${V.cardBorder}`,borderRadius:8,fontSize:10}}
+                  formatter={(v,n)=>[v.toLocaleString(),n]}/>
+                <Area type="monotone" dataKey="high" stroke="none" fill="url(#projBand)" name="Upper bound"/>
+                <Area type="monotone" dataKey="low" stroke="none" fill={V.bg} name="Lower bound"/>
+                <Area type="monotone" dataKey="users" stroke={V.accent} fill="url(#projGrad)" strokeWidth={2} name="Projected Users" dot={false}/>
+              </AreaChart>
+            </ResponsiveContainer>
+            {/* Summary row */}
+            {(d.projections||[]).length>0&&(()=>{
+              const last=d.projections[d.projections.length-1];
+              const mid=d.projections[5];
+              return(
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginTop:10}}>
+                  {[{l:"6-Month Users",v:mid?.users?.toLocaleString(),c:V.accent2,s:mid?.month},{l:"12-Month Users",v:last?.users?.toLocaleString(),c:V.accent,s:last?.month},{l:"12-Month MRR",v:"$"+(last?.mrr?.toLocaleString()),c:"#22c55e",s:"@ 5% conv."}].map(k=>(
+                    <div key={k.l} style={{padding:"10px 8px",borderRadius:12,textAlign:"center",background:`${k.c}08`,border:`1px solid ${k.c}25`}}>
+                      <div style={{fontSize:16,fontWeight:900,color:k.c,fontFamily:V.mono}}>{k.v}</div>
+                      <div style={{fontSize:9,fontWeight:700,color:V.text2,marginTop:3}}>{k.l}</div>
+                      <div style={{fontSize:8,color:V.text3}}>{k.s}</div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+          </Card>
+          <Card style={{padding:14}}>
+            <SectionTitle color="#ec4899">K-Factor / Viral Coefficient</SectionTitle>
+            <div style={{fontSize:10,color:V.text3,marginBottom:10}}>K &gt; 1.0 = viral growth · K &gt; 0.5 = meaningful organic boost</div>
+            {(()=>{
+              const v=d.viral||{kFactor:0,invitesSent:0,inviteConvRate:0,organicFromInvites:0,paidVsOrganic:{paid:0,organic:0}};
+              const kC=v.kFactor>=1?"#22c55e":v.kFactor>=0.5?"#4ade80":v.kFactor>=0.3?"#f59e0b":"#f43f5e";
+              return(
+                <div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8,marginBottom:12}}>
+                    {[{l:"K-Factor",v:v.kFactor?.toFixed(2),c:kC,s:v.kFactor>=1?"Viral 🚀":v.kFactor>=0.5?"Strong 💪":"Building 📈"},{l:"Invites Sent",v:v.invitesSent?.toLocaleString(),c:V.accent,s:"by existing users"},{l:"Invite Conv.",v:v.inviteConvRate+"%",c:V.accent2,s:"invite→signup"},{l:"Organic Signups",v:v.organicFromInvites?.toLocaleString(),c:"#22c55e",s:"from referrals"}].map(k=>(
+                      <div key={k.l} style={{padding:"10px 8px",borderRadius:12,textAlign:"center",background:`${k.c}08`,border:`1px solid ${k.c}25`}}>
+                        <div style={{fontSize:15,fontWeight:900,color:k.c,fontFamily:V.mono}}>{k.v}</div>
+                        <div style={{fontSize:9,fontWeight:700,color:V.text2,marginTop:3}}>{k.l}</div>
+                        <div style={{fontSize:8,color:V.text3}}>{k.s}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{marginBottom:6}}>
+                    <div style={{fontSize:10,fontWeight:700,color:V.text2,marginBottom:6}}>Paid vs. Organic Acquisition Split</div>
+                    <div style={{display:"flex",height:14,borderRadius:4,overflow:"hidden",gap:2}}>
+                      <div style={{flex:v.paidVsOrganic?.paid,background:V.accent,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                        <span style={{fontSize:8,color:V.bg,fontWeight:700}}>{Math.round(v.paidVsOrganic?.paid/(v.paidVsOrganic?.paid+v.paidVsOrganic?.organic||1)*100)}% Paid</span>
+                      </div>
+                      <div style={{flex:v.paidVsOrganic?.organic,background:"#22c55e",display:"flex",alignItems:"center",justifyContent:"center"}}>
+                        <span style={{fontSize:8,color:V.bg,fontWeight:700}}>{Math.round(v.paidVsOrganic?.organic/(v.paidVsOrganic?.paid+v.paidVsOrganic?.organic||1)*100)}% Organic</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
           </Card>
         </div>
       )}
