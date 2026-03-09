@@ -18615,15 +18615,44 @@ function AdminBusinessValue({s}){
   const [loading,setLoading]=useState(true);
   const [tab,setTab]=useState("overview");
   const [lastRefresh,setLastRefresh]=useState(null);
-
   const [loadError,setLoadError]=useState(null);
+  const [mockScale,setMockScale]=useState(()=>{try{const c=LS.get("ft-mock-analytics");return c?._isMock?c._scale:null;}catch(e){return null;}});
+  const isMock=!!mockScale;
+  const [timeRange,setTimeRange]=useState("30d");
+
+  const loadMock=(scale)=>{
+    const d=generateMockData(scale);
+    LS.set("ft-mock-analytics",d);
+    setMockScale(scale);setData(d);setLoading(false);setLoadError(null);setLastRefresh(new Date());
+  };
+  const clearMock=()=>{
+    try{localStorage.removeItem("ft-mock-analytics");}catch(e){}
+    setMockScale(null);setData(null);
+    setLoading(true);
+    af("business_analytics").then(r=>{
+      if(r?.__error){setLoadError(r.__error);setData(null);}
+      else setData(r);
+      setLoading(false);setLastRefresh(new Date());
+    });
+  };
   const load=()=>{
+    try{const cached=LS.get("ft-mock-analytics");if(cached?._isMock){setData(cached);setMockScale(cached._scale);setLoading(false);setLastRefresh(new Date());return;}}catch(e){}
     setLoading(true);setLoadError(null);
     af("business_analytics").then(r=>{
       if(r?.__error){setLoadError(r.__error);setData(null);}
       else setData(r);
       setLoading(false);setLastRefresh(new Date());
     });
+  };
+  const exportCSV=(filename,rows)=>{
+    if(!rows||!rows.length)return;
+    const keys=Object.keys(rows[0]);
+    const csv=[keys.join(","),...rows.map(r=>keys.map(k=>JSON.stringify(r[k]??"")||""  ).join(","))].join("
+");
+    const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));a.download=filename+".csv";a.click();
+  };
+  const exportJSON=(filename,data2)=>{
+    const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([JSON.stringify(data2,null,2)],{type:"application/json"}));a.download=filename+".json";a.click();
   };
   useEffect(()=>{load();},[]);
 
