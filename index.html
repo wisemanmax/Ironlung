@@ -919,6 +919,8 @@ const calcPlates=(total)=>{let ps=(total-45)/2;if(ps<=0)return total<=45?[]:null
 const toKg=(lbs)=>Math.round(lbs*0.4536*10)/10;
 const toLbs=(kg)=>Math.round(kg/0.4536*10)/10;
 const wUnit=(units)=>units==="kg"?"kg":"lbs";
+const dUnit=(units)=>units==="kg"?"km":"mi";
+const isCardio=(exerciseId,exercises)=>exercises.find(e=>e.id===exerciseId)?.cat==="Cardio";
 const convW=(v,units)=>units==="kg"?toKg(v):v;
 
 const defaultExercises = [
@@ -1368,7 +1370,19 @@ function genDemo(){
       else if(split===3) exList=["bench","row","ohp","pullup","curl"]; // Upper
       else               exList=["squat","deadlift","rdl","legpress"]; // Lower
 
+      // Add cardio to some workouts (every 3rd day)
+      const CARDIO_IDS=["treadmill","rowing","biking","stairmaster","elliptical"];
+      if(split%3===0) exList.push(CARDIO_IDS[i%CARDIO_IDS.length]);
+
       const exs = exList.map(eid=>{
+        // Cardio exercises use duration/distance
+        const cardioIds=["treadmill","rowing","biking","stairmaster","elliptical","jumprope","battlerop","burpee","assaultbike","swimming","hiking","sprintinterval"];
+        if(cardioIds.includes(eid)){
+          const baseDur=Math.round(20+progress*20);
+          const baseDist=parseFloat((1.5+progress*2.5+rf(-0.3,0.3)).toFixed(1));
+          const sets=[{duration:baseDur+ri(-5,5),distance:parseFloat(baseDist.toFixed(1)),rpe:ri(6,9),done:true}];
+          return{exerciseId:eid,sets,note:""};
+        }
         const peak = PEAKS[eid]||100;
         // Progressive weights: start 55% of peak, reach 100% by today
         const base = Math.round(peak*(0.55 + progress*0.45));
@@ -1871,9 +1885,14 @@ function validateWorkout(w,s){
   const warnings=[];
   w.exercises.forEach(ex=>{
     const name=s.exercises.find(e=>e.id===ex.exerciseId)?.name||ex.exerciseId;
+    const cardio=isCardio(ex.exerciseId,s.exercises);
     ex.sets.forEach(st=>{
-      if(st.weight>800)warnings.push(`${name}: ${st.weight} ${wUnit(s.units)} seems extremely high`);
-      if(st.reps>100)warnings.push(`${name}: ${st.reps} reps seems high`);
+      if(cardio){
+        if(st.duration>300)warnings.push(`${name}: ${st.duration} min seems extremely long`);
+      }else{
+        if(st.weight>800)warnings.push(`${name}: ${st.weight} ${wUnit(s.units)} seems extremely high`);
+        if(st.reps>100)warnings.push(`${name}: ${st.reps} reps seems high`);
+      }
     });
   });
   // Duplicate check
@@ -2559,10 +2578,13 @@ function useNutritionStreak(nutrition){
 }
 
 // ─── Find last sets for an exercise (for auto-fill) ───
-function findLastSets(exerciseId,workouts){
+function findLastSets(exerciseId,workouts,exercises){
   for(const w of workouts){
     const ex=w.exercises.find(e=>e.exerciseId===exerciseId);
     if(ex&&ex.sets.length>0){
+      if(isCardio(exerciseId,exercises||[])){
+        return ex.sets.map(st=>({duration:(st.duration||"").toString(),distance:(st.distance||"").toString(),rpe:st.rpe?st.rpe.toString():"",done:true}));
+      }
       return ex.sets.map(st=>({weight:st.weight.toString(),reps:st.reps.toString(),rpe:st.rpe?st.rpe.toString():"",done:true}));
     }
   }
@@ -2982,7 +3004,7 @@ function HomeTab({s,d}){
   const tn=s.nutrition.find(n=>n.date===td);
   const todayW=s.workouts.find(w=>w.date===td);
   const ww=s.workouts.filter(w=>w.date>=ago(7)).length;
-  const vol=s.workouts.filter(w=>w.date>=ago(7)).reduce((sum,w)=>sum+w.exercises.reduce((es,ex)=>es+ex.sets.reduce((ss,st)=>ss+(parseFloat(st.weight)||0)*(parseInt(st.reps)||0),0),0),0);
+  const vol=s.workouts.filter(w=>w.date>=ago(7)).reduce((sum,w)=>sum+w.exercises.reduce((es,ex)=>{const c=isCardio(ex.exerciseId,s.exercises);return es+ex.sets.reduce((ss,st)=>ss+(c?(parseFloat(st.duration)||0):(parseFloat(st.weight)||0)*(parseInt(st.reps)||0)),0);},0),0);
   const dow=new Date().getDay();
   const todayType=s.schedule.overrides[td]||s.schedule.weekly[dow]||"Rest";
   const u=wUnit(s.units);
@@ -3701,7 +3723,7 @@ function WorkoutTab({s,d}){
   const volTrend=useMemo(()=>{
     const recent=s.workouts.slice(0,10);
     if(recent.length<2)return null;
-    const calcVol=(w)=>w.exercises.reduce((a,e)=>a+e.sets.reduce((b,st)=>b+(parseFloat(st.weight)||0)*(parseInt(st.reps)||0),0),0);
+    const calcVol=(w)=>w.exercises.reduce((a,e)=>{const c=isCardio(e.exerciseId,s.exercises);return a+e.sets.reduce((b,st)=>b+(c?(parseFloat(st.duration)||0):(parseFloat(st.weight)||0)*(parseInt(st.reps)||0)),0);},0);
     const last=calcVol(recent[0]);const prev=calcVol(recent[1]);
     if(!prev)return null;
     const diff=last-prev;const pct=Math.round(diff/prev*100);
@@ -3715,9 +3737,14 @@ function WorkoutTab({s,d}){
 
   // Returns last logged top set for an exercise — shown as "Last: 185×5 (Mar 1)" hint
   const getLastPerf=(exerciseId)=>{
+    const cardio=isCardio(exerciseId,s.exercises);
     for(const w of s.workouts){
       const ex=w.exercises.find(e=>e.exerciseId===exerciseId);
       if(ex&&ex.sets.length>0){
+        if(cardio){
+          const top=ex.sets.reduce((best,st)=>(parseFloat(st.duration)||0)>(parseFloat(best.duration)||0)?st:best,ex.sets[0]);
+          return{date:w.date,sets:ex.sets.length,topDuration:parseFloat(top.duration)||0,topDistance:parseFloat(top.distance)||0,cardio:true};
+        }
         const top=ex.sets.reduce((best,st)=>(parseFloat(st.weight)||0)>(parseFloat(best.weight)||0)?st:best,ex.sets[0]);
         return{date:w.date,sets:ex.sets.length,topWeight:parseFloat(top.weight)||0,topReps:parseInt(top.reps)||0};
       }
@@ -3765,10 +3792,13 @@ function WorkoutTab({s,d}){
   const repeatLast=()=>{
     if(s.workouts.length===0)return;
     const last=s.workouts[0];
-    const exs=last.exercises.map(ex=>({
-      exerciseId:ex.exerciseId,
-      sets:ex.sets.map(st=>({weight:st.weight.toString(),reps:st.reps.toString(),rpe:st.rpe?st.rpe.toString():"",done:true}))
-    }));
+    const exs=last.exercises.map(ex=>{
+      const cardio=isCardio(ex.exerciseId,s.exercises);
+      return{exerciseId:ex.exerciseId,
+        sets:ex.sets.map(st=>cardio
+          ?{duration:(st.duration||"").toString(),distance:(st.distance||"").toString(),rpe:st.rpe?st.rpe.toString():"",done:true}
+          :{weight:st.weight.toString(),reps:st.reps.toString(),rpe:st.rpe?st.rpe.toString():"",done:true})};
+    });
     setForm({date:today(),dur:"",exercises:exs,notes:"",rating:3});
     setNewPRs([]);setStartTime(Date.now());setElapsed(0);setShow(true);
   };
@@ -3776,8 +3806,9 @@ function WorkoutTab({s,d}){
   const loadTemplate=(t)=>{
     // Pre-fill weights from last time each exercise was done
     const exs=t.exs.map(eid=>{
-      const lastW=findLastSets(eid,s.workouts);
-      return{exerciseId:eid,sets:lastW||[{weight:"",reps:"",rpe:"",done:true}]};
+      const lastW=findLastSets(eid,s.workouts,s.exercises);
+      const cardio=isCardio(eid,s.exercises);
+      return{exerciseId:eid,sets:lastW||(cardio?[{duration:"",distance:"",rpe:"",done:true}]:[{weight:"",reps:"",rpe:"",done:true}])};
     });
     setForm(f=>({...f,exercises:exs}));
     setShowTemplates(false);setStartTime(Date.now());setElapsed(0);setShow(true);
@@ -3786,7 +3817,14 @@ function WorkoutTab({s,d}){
   const addEx=()=>{
     if(!selEx)return;
     Haptic.light();
-    const lastW=findLastSets(selEx,s.workouts);
+    const cardio=isCardio(selEx,s.exercises);
+    const lastW=findLastSets(selEx,s.workouts,s.exercises);
+    if(cardio){
+      const sets=lastW||[{duration:"",distance:"",rpe:"",done:true}];
+      setForm(f=>({...f,exercises:[...f.exercises,{exerciseId:selEx,sets}]}));
+      setSelEx("");
+      return;
+    }
     // #6: Apply overload suggestion to auto-fill weights
     const sug=getOverloadSuggestion(selEx,s.workouts,s.units);
     let sets=lastW||[{weight:"",reps:"",rpe:"",done:true}];
@@ -3797,12 +3835,12 @@ function WorkoutTab({s,d}){
     setForm(f=>({...f,exercises:[...f.exercises,{exerciseId:selEx,sets}]}));
     setSelEx("");
   };
-  const addSet=(ei)=>{Haptic.light();setForm(f=>{const exs=[...f.exercises];const l=exs[ei].sets[exs[ei].sets.length-1];exs[ei]={...exs[ei],sets:[...exs[ei].sets,{weight:l.weight,reps:l.reps,rpe:l.rpe,done:true,warmup:false,drop:false,fail:false}]};const next={...f,exercises:exs};saveActiveWkt(next);return next;});};
+  const addSet=(ei)=>{Haptic.light();setForm(f=>{const exs=[...f.exercises];const l=exs[ei].sets[exs[ei].sets.length-1];const cardio=isCardio(exs[ei].exerciseId,s.exercises);const newSet=cardio?{duration:l.duration||"",distance:l.distance||"",rpe:l.rpe,done:true}:{weight:l.weight,reps:l.reps,rpe:l.rpe,done:true,warmup:false,drop:false,fail:false};exs[ei]={...exs[ei],sets:[...exs[ei].sets,newSet]};const next={...f,exercises:exs};saveActiveWkt(next);return next;});};
   // I8: Persist active workout to IDB for crash recovery
   const saveActiveWkt=useCallback((f)=>{if(f.exercises?.length>0)ActiveWorkoutStore.save({...f,startTime}).catch(()=>{});},[startTime]);
   const updSet=(ei,si,k,v)=>{setForm(f=>{const exs=[...f.exercises],sets=[...exs[ei].sets];const prev=sets[si][k];sets[si]={...sets[si],[k]:v};exs[ei]={...exs[ei],sets};
-    // #2: Auto-start rest timer when reps filled
-    if(k==="reps"&&!prev&&v&&!sets[si].warmup)setTimeout(()=>RestTimerCtrl.trigger(),100);
+    // #2: Auto-start rest timer when reps filled (not for cardio)
+    if(k==="reps"&&!prev&&v&&!sets[si].warmup&&!isCardio(exs[ei].exerciseId,s.exercises))setTimeout(()=>RestTimerCtrl.trigger(),100);
     return{...f,exercises:exs};});};
   const toggleSetFlag=(ei,si,flag)=>{setForm(f=>{const exs=[...f.exercises],sets=[...exs[ei].sets];sets[si]={...sets[si],[flag]:!sets[si][flag]};exs[ei]={...exs[ei],sets};return{...f,exercises:exs};});};
   const rmSet=(ei,si)=>setForm(f=>{const exs=[...f.exercises];exs[ei]={...exs[ei],sets:exs[ei].sets.filter((_,i)=>i!==si)};return{...f,exercises:exs};});
@@ -3853,8 +3891,13 @@ function WorkoutTab({s,d}){
   const buildWorkout=()=>{
     const dur=parseInt(form.dur)||Math.round(elapsed/60)||0;
     return{id:editingId||uid(),date:form.date,dur,rating:form.rating,
-      exercises:form.exercises.map(e=>({exerciseId:e.exerciseId,note:e.note||"",supersetGroup:e.supersetGroup||null,
-        sets:e.sets.filter(st=>!st.warmup).map(st=>({weight:parseFloat(st.weight)||0,reps:parseInt(st.reps)||0,rpe:parseFloat(st.rpe)||0,done:st.done,drop:!!st.drop,fail:!!st.fail}))})),
+      exercises:form.exercises.map(e=>{
+        const cardio=isCardio(e.exerciseId,s.exercises);
+        return{exerciseId:e.exerciseId,note:e.note||"",supersetGroup:e.supersetGroup||null,
+          sets:e.sets.filter(st=>!st.warmup).map(st=>cardio
+            ?{duration:parseFloat(st.duration)||0,distance:parseFloat(st.distance)||0,rpe:parseFloat(st.rpe)||0,done:st.done}
+            :{weight:parseFloat(st.weight)||0,reps:parseInt(st.reps)||0,rpe:parseFloat(st.rpe)||0,done:st.done,drop:!!st.drop,fail:!!st.fail})};
+      }),
       notes:form.notes};
   };
   const save=()=>{
@@ -3864,6 +3907,7 @@ function WorkoutTab({s,d}){
     setValWarnings(null);
     const detected=[];
     w.exercises.forEach(ex=>{
+      if(isCardio(ex.exerciseId,s.exercises))return;
       const name=s.exercises.find(e=>e.id===ex.exerciseId)?.name||ex.exerciseId;
       ex.sets.forEach(st=>{const e1rm=calc1RM(st.weight,st.reps);const prev=prs[ex.exerciseId];
         if(st.weight>0&&(!prev||e1rm>prev.e1rm))detected.push({name,weight:st.weight,reps:st.reps,e1rm});});});
@@ -4018,7 +4062,7 @@ function WorkoutTab({s,d}){
               {selEx&&<Btn full onClick={addEx}>{Icons.plus({size:14,color:V.bg})} Add {s.exercises.find(e=>e.id===selEx)?.name||""}</Btn>}
             </div>
             {/* #5: Last workout preview for selected exercise */}
-            {selEx&&(()=>{
+            {selEx&&!isCardio(selEx,s.exercises)&&(()=>{
               const sug=getOverloadSuggestion(selEx,s.workouts,s.units);
               if(!sug)return null;
               return(
@@ -4052,7 +4096,9 @@ function WorkoutTab({s,d}){
                     <span style={{fontSize:14,color:V.text,fontWeight:700}}>{info?.name}</span>
                     <YTBtn yt={info?.yt} size={24}/>
                     {pb&&<span style={{fontSize:10,color:V.text3}}>PR:{pb}</span>}
-                    {(()=>{const lp=getLastPerf(ex.exerciseId);if(!lp||lp.topWeight===0||pb)return null;
+                    {(()=>{const lp=getLastPerf(ex.exerciseId);if(!lp||pb)return null;
+                      if(lp.cardio)return lp.topDuration>0?<span style={{fontSize:9,color:V.text3,fontFamily:V.mono}}>Last: {lp.topDuration}min · {lp.topDistance}{dUnit(s.units)}</span>:null;
+                      if(lp.topWeight===0)return null;
                       return <span style={{fontSize:9,color:V.text3,fontFamily:V.mono}}>Last: {lp.topWeight}×{lp.topReps}</span>;})()}
                   </div>
                   <div style={{display:"flex",gap:2}}>
@@ -4061,7 +4107,7 @@ function WorkoutTab({s,d}){
                     <button onClick={()=>rmEx(ei)} aria-label="Remove exercise" style={{background:"none",border:"none",padding:4,cursor:"pointer"}}>{Icons.trash({size:14,color:V.text3})}</button>
                   </div>
                 </div>
-                {(()=>{const sug=getOverloadSuggestion(ex.exerciseId,s.workouts,s.units);return sug?(
+                {(()=>{if(isCardio(ex.exerciseId,s.exercises))return null;const sug=getOverloadSuggestion(ex.exerciseId,s.workouts,s.units);return sug?(
                   <div style={{marginBottom:10,padding:"8px 10px",
                     background:sug.type==="deload"?`${V.warn}08`:sug.type==="increase"?`${V.accent}08`:`${V.accent2}08`,
                     borderRadius:8,border:`1px solid ${sug.type==="deload"?V.warn:sug.type==="increase"?V.accent:V.accent2}15`}}>
@@ -4082,6 +4128,31 @@ function WorkoutTab({s,d}){
                     <div style={{fontSize:9,color:V.text3,marginTop:2}}>{sug.reason}</div>
                   </div>
                 ):null;})()}
+                {(()=>{const cardio=isCardio(ex.exerciseId,s.exercises);return cardio?(
+                  <React.Fragment>
+                  <div style={{display:"grid",gridTemplateColumns:"28px 1fr 1fr 1fr 28px",gap:4,marginBottom:6}}>
+                    <span style={{fontSize:9,color:V.text3,textAlign:"center"}}>#</span>
+                    <span style={{fontSize:9,color:V.text3}}>MIN</span><span style={{fontSize:9,color:V.text3}}>DIST ({dUnit(s.units)})</span>
+                    <span style={{fontSize:9,color:V.text3}}>RPE</span><span/>
+                  </div>
+                  {ex.sets.map((st,si)=>(
+                    <div key={si} style={{display:"grid",gridTemplateColumns:"28px 1fr 1fr 1fr 28px",gap:4,marginBottom:4,alignItems:"center"}}>
+                      <span style={{fontSize:12,color:V.text3,textAlign:"center",fontFamily:V.mono}}>{si+1}</span>
+                      {["duration","distance","rpe"].map(k=>(
+                        <input key={k} type="number" inputMode="decimal" value={st[k]||""} onChange={e=>updSet(ei,si,k,e.target.value)}
+                          placeholder="0" style={{padding:"10px 8px",background:"rgba(255,255,255,0.04)",
+                            border:"1px solid rgba(255,255,255,0.05)",
+                            borderRadius:10,color:V.text,fontSize:15,fontFamily:V.mono,outline:"none",width:"100%",
+                            boxSizing:"border-box",textAlign:"center",minHeight:40,WebkitAppearance:"none"}}/>
+                      ))}
+                      <button onClick={()=>rmSet(ei,si)} disabled={ex.sets.length<=1}
+                        style={{background:"none",border:"none",padding:"5px 4px",cursor:ex.sets.length<=1?"default":"pointer",opacity:ex.sets.length<=1?.2:1,minHeight:28}}>
+                        {Icons.x({size:12,color:V.text3})}</button>
+                    </div>
+                  ))}
+                  </React.Fragment>
+                ):(
+                  <React.Fragment>
                 <div style={{display:"grid",gridTemplateColumns:"28px 1fr 1fr 1fr 46px",gap:4,marginBottom:6}}>
                   <span style={{fontSize:9,color:V.text3,textAlign:"center"}}>#</span>
                   <span style={{fontSize:9,color:V.text3}}>{wUnit(s.units).toUpperCase()}</span><span style={{fontSize:9,color:V.text3}}>REPS</span>
@@ -4111,9 +4182,11 @@ function WorkoutTab({s,d}){
                     </div>
                   </div>
                 ))}
+                  </React.Fragment>
+                );})()}
                 <div style={{display:"flex",gap:6,marginTop:8}}>
                   <Btn v="small" onClick={()=>addSet(ei)} s={{flex:1}}>{Icons.plus({size:13,color:V.accent})} Add Set</Btn>
-                  {ex.sets.some(st=>parseFloat(st.weight)>0)&&!ex.sets.some(st=>st.warmup)&&(
+                  {!isCardio(ex.exerciseId,s.exercises)&&ex.sets.some(st=>parseFloat(st.weight)>0)&&!ex.sets.some(st=>st.warmup)&&(
                     <Btn v="small" onClick={()=>addWarmups(ei)} s={{flex:0,flexShrink:0,fontSize:10,padding:"6px 10px",background:`${V.warn}10`,color:V.warn,border:`1px solid ${V.warn}20`}}>🔥 Warm-up</Btn>
                   )}
                 </div>
@@ -4194,7 +4267,7 @@ function WorkoutTab({s,d}){
         return filteredW.length===0?(
           <div style={{textAlign:"center",padding:40,color:V.text3,fontSize:13}}>{histSearch?"No workouts match that exercise":"No workouts yet"}</div>
         ):filteredW.slice(0,showAll?999:15).map(w=>{
-        const vol=w.exercises.reduce((s2,e)=>s2+e.sets.filter(st=>!st.warmup).reduce((ss,st)=>ss+(parseFloat(st.weight)||0)*(parseInt(st.reps)||0),0),0);
+        const vol=w.exercises.reduce((s2,e)=>{const c=isCardio(e.exerciseId,s.exercises);return s2+e.sets.filter(st=>!st.warmup).reduce((ss,st)=>ss+(c?(parseFloat(st.duration)||0):(parseFloat(st.weight)||0)*(parseInt(st.reps)||0)),0);},0);
         const expanded=expandedId===w.id;
         return(
           <Card key={w.id} onClick={()=>setExpandedId(expanded?null:w.id)} style={{padding:14,cursor:"pointer"}}>
@@ -4223,7 +4296,10 @@ function WorkoutTab({s,d}){
             </div>
             {w.exercises.map((ex,i)=>{
               const exInfo=s.exercises.find(e=>e.id===ex.exerciseId);
-              const top=ex.sets.reduce((m,st)=>st.weight>m.weight?st:m,{weight:0,reps:0});
+              const cardio=isCardio(ex.exerciseId,s.exercises);
+              const top=cardio
+                ?ex.sets.reduce((m,st)=>(parseFloat(st.duration)||0)>(parseFloat(m.duration)||0)?st:m,{duration:0,distance:0})
+                :ex.sets.reduce((m,st)=>st.weight>m.weight?st:m,{weight:0,reps:0});
               return(
                 <div key={i}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 0",
@@ -4232,7 +4308,7 @@ function WorkoutTab({s,d}){
                       <span style={{fontSize:12,color:V.text}}>{exInfo?.name||ex.exerciseId}</span>
                       <YTBtn yt={exInfo?.yt} size={18}/>
                     </div>
-                    <span style={{fontSize:11,color:V.accent,fontFamily:V.mono}}>{top.weight}×{top.reps} · {ex.sets.length}s</span>
+                    <span style={{fontSize:11,color:V.accent,fontFamily:V.mono}}>{cardio?`${top.duration}min · ${top.distance}${dUnit(s.units)}`:`${top.weight}×${top.reps} · ${ex.sets.length}s`}</span>
                   </div>
                   {/* #7 Expanded detail: all sets */}
                   {expanded&&(
@@ -4240,10 +4316,14 @@ function WorkoutTab({s,d}){
                       {ex.sets.map((st,si)=>(
                         <div key={si} style={{display:"flex",gap:8,fontSize:10,color:V.text3,padding:"2px 0",alignItems:"center"}}>
                           <span>Set {si+1}:</span>
-                          <span style={{color:V.accent,fontFamily:V.mono}}>{st.weight}×{st.reps}</span>
+                          {cardio?(
+                            <span style={{color:V.accent,fontFamily:V.mono}}>{st.duration}min · {st.distance}{dUnit(s.units)}</span>
+                          ):(
+                            <span style={{color:V.accent,fontFamily:V.mono}}>{st.weight}×{st.reps}</span>
+                          )}
                           {st.rpe>0&&<span>RPE {st.rpe}</span>}
-                          {st.drop&&<span style={{fontSize:8,padding:"1px 4px",borderRadius:3,background:`${V.accent2}15`,color:V.accent2,fontWeight:700}}>DROP</span>}
-                          {st.fail&&<span style={{fontSize:8,padding:"1px 4px",borderRadius:3,background:`${V.danger}15`,color:V.danger,fontWeight:700}}>FAIL</span>}
+                          {!cardio&&st.drop&&<span style={{fontSize:8,padding:"1px 4px",borderRadius:3,background:`${V.accent2}15`,color:V.accent2,fontWeight:700}}>DROP</span>}
+                          {!cardio&&st.fail&&<span style={{fontSize:8,padding:"1px 4px",borderRadius:3,background:`${V.danger}15`,color:V.danger,fontWeight:700}}>FAIL</span>}
                         </div>
                       ))}
                       {ex.note&&<div style={{fontSize:9,color:V.text3,fontStyle:"italic",marginTop:4}}>📝 {ex.note}</div>}
@@ -5161,26 +5241,34 @@ function BodyTab({s,d}){
 function AnalyticsTab({s}){
   const [selEx,setSelEx]=useState("bench");
 
+  const selIsCardio=isCardio(selEx,s.exercises);
   const exProg=useMemo(()=>{
     let runMax=0;
     return s.workouts.filter(w=>w.date>=ago(s.range)).sort((a,b)=>a.date.localeCompare(b.date)).reduce((arr,w)=>{
       const ex=w.exercises.find(e=>e.exerciseId===selEx);
       if(ex){
-        const mw=Math.max(...ex.sets.map(st=>st.weight));
-        const vol=ex.sets.reduce((s,st)=>s+(parseFloat(st.weight)||0)*(parseInt(st.reps)||0),0);
-        const e1rm=Math.max(...ex.sets.map(st=>st.weight*(1+st.reps/30)));
-        const isPRPoint=mw>runMax;if(mw>runMax)runMax=mw;
-        arr.push({date:fmtShort(w.date),max:mw,vol,e1rm:Math.round(e1rm),isPR:isPRPoint});
+        if(selIsCardio){
+          const totalDur=ex.sets.reduce((s,st)=>s+(parseFloat(st.duration)||0),0);
+          const totalDist=ex.sets.reduce((s,st)=>s+(parseFloat(st.distance)||0),0);
+          const isPRPoint=totalDist>runMax;if(totalDist>runMax)runMax=totalDist;
+          arr.push({date:fmtShort(w.date),max:totalDist,vol:totalDur,e1rm:0,isPR:isPRPoint});
+        }else{
+          const mw=Math.max(...ex.sets.map(st=>st.weight));
+          const vol=ex.sets.reduce((s,st)=>s+(parseFloat(st.weight)||0)*(parseInt(st.reps)||0),0);
+          const e1rm=Math.max(...ex.sets.map(st=>st.weight*(1+st.reps/30)));
+          const isPRPoint=mw>runMax;if(mw>runMax)runMax=mw;
+          arr.push({date:fmtShort(w.date),max:mw,vol,e1rm:Math.round(e1rm),isPR:isPRPoint});
+        }
       }
       return arr;
     },[]);
-  },[s.workouts,selEx,s.range]);
+  },[s.workouts,selEx,s.range,selIsCardio]);
 
   const volByGroup=useMemo(()=>{
     const g={};
     s.workouts.filter(w=>w.date>=ago(s.range)).forEach(w=>w.exercises.forEach(ex=>{
       const info=s.exercises.find(e=>e.id===ex.exerciseId);
-      if(info){const v=ex.sets.reduce((s,st)=>s+(parseFloat(st.weight)||0)*(parseInt(st.reps)||0),0);g[info.cat]=(g[info.cat]||0)+v;}
+      if(info){const c=info.cat==="Cardio";const v=c?ex.sets.reduce((s,st)=>s+(parseFloat(st.duration)||0),0):ex.sets.reduce((s,st)=>s+(parseFloat(st.weight)||0)*(parseInt(st.reps)||0),0);g[info.cat]=(g[info.cat]||0)+v;}
     }));
     return Object.entries(g).map(([name,value])=>({name,value}));
   },[s.workouts,s.exercises,s.range]);
@@ -5211,15 +5299,15 @@ function AnalyticsTab({s}){
             <Chip key={id} label={s.exercises.find(e=>e.id===id)?.name||id} active={selEx===id} onClick={()=>setSelEx(id)}/>
           ))}
         </div>
-        <span style={{fontSize:11,color:V.text3,display:"block",marginBottom:6}}>Max Weight & Est. 1RM</span>
+        <span style={{fontSize:11,color:V.text3,display:"block",marginBottom:6}}>{selIsCardio?`Distance (${dUnit(s.units)}) & Duration`:"Max Weight & Est. 1RM"}</span>
         <ResponsiveContainer width="100%" height={180}>
           <LineChart data={exProg}>
             <CartesianGrid {...chartCfg.grid} vertical={false}/>
             <XAxis dataKey="date" {...chartCfg.axis} interval="preserveStartEnd"/>
             <YAxis {...chartCfg.axis} width={30}/>
             <Tooltip {...chartCfg.tip}/>
-            <Line type="monotone" dataKey="max" stroke={V.accent} strokeWidth={2} dot={{r:3}} name="Max"/>
-            <Line type="monotone" dataKey="e1rm" stroke={V.purple} strokeWidth={2} strokeDasharray="5 5" dot={{r:2}} name="E1RM"/>
+            <Line type="monotone" dataKey="max" stroke={V.accent} strokeWidth={2} dot={{r:3}} name={selIsCardio?"Distance":"Max"}/>
+            {!selIsCardio&&<Line type="monotone" dataKey="e1rm" stroke={V.purple} strokeWidth={2} strokeDasharray="5 5" dot={{r:2}} name="E1RM"/>}
             {exProg.filter(p=>p.isPR).map((p,i)=>(
               <ReferenceDot key={i} x={p.date} y={p.max} r={6}
                 fill="#f59e0b" stroke={V.bg} strokeWidth={2}

@@ -14,6 +14,8 @@ const calcPlates=(total)=>{let ps=(total-45)/2;if(ps<=0)return total<=45?[]:null
 const toKg=(lbs)=>Math.round(lbs*0.4536*10)/10;
 const toLbs=(kg)=>Math.round(kg/0.4536*10)/10;
 const wUnit=(units)=>units==="kg"?"kg":"lbs";
+const dUnit=(units)=>units==="kg"?"km":"mi";
+const isCardio=(exerciseId,exercises)=>exercises.find(e=>e.id===exerciseId)?.cat==="Cardio";
 const convW=(v,units)=>units==="kg"?toKg(v):v;
 
 
@@ -54,9 +56,14 @@ function validateWorkout(w,s){
   const warnings=[];
   w.exercises.forEach(ex=>{
     const name=s.exercises.find(e=>e.id===ex.exerciseId)?.name||ex.exerciseId;
+    const cardio=isCardio(ex.exerciseId,s.exercises);
     ex.sets.forEach(st=>{
-      if(st.weight>800)warnings.push(`${name}: ${st.weight} ${wUnit(s.units)} seems extremely high`);
-      if(st.reps>100)warnings.push(`${name}: ${st.reps} reps seems high`);
+      if(cardio){
+        if(st.duration>300)warnings.push(`${name}: ${st.duration} min seems extremely long`);
+      }else{
+        if(st.weight>800)warnings.push(`${name}: ${st.weight} ${wUnit(s.units)} seems extremely high`);
+        if(st.reps>100)warnings.push(`${name}: ${st.reps} reps seems high`);
+      }
     });
   });
   // Duplicate check
