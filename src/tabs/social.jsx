@@ -11,6 +11,7 @@ import { BADGE_DEFS, calcEarnedBadges } from '../data/badges';
 import { IRON_RANKS } from '../data/ranks';
 import { HelpBtn } from './features';
 import { IronScoreCard, RankBadge, DailyMissionsCard } from './gamification';
+import { useStreak } from '../components/dialogs';
 import { SectionGrid } from './hubs';
 
 export function SocialTab({s,d,unreadMsgCount=0}){
