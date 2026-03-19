@@ -5,13 +5,14 @@ import { LS } from '../utils/storage';
 import { Icons } from '../components/Icons';
 import { Card, Btn, Field, Sheet, Chip, Stat, Progress, ConfirmCtrl, SuccessToastCtrl } from '../components/ui';
 import { today, ago, fmtShort, fmtFull, uid, wUnit, toKg, toLbs } from '../utils/helpers';
-import { CloudSync, SocialAPI, SYNC_URL, APP_VERSION, SW_VERSION } from '../utils/sync';
-import { SessionManager } from '../utils/auth';
+import { CloudSync, SocialAPI, SYNC_URL, APP_VERSION, SW_VERSION, ReconcileAPI } from '../utils/sync';
+import { AuthToken, SessionManager } from '../utils/auth';
 import { SentryUtil } from '../utils/sentry';
 import { defaultExercises } from '../data/exercises';
 import { defaultSchedule } from '../state/reducer';
 import { genDemo } from '../data/demo';
 import { BADGE_DEFS, calcEarnedBadges } from '../data/badges';
+import { ProfileEditor, DataManager } from './features';
 
 export function SystemHealthPanel({s}) {
   const [reconcile, setReconcile] = useState(() => ReconcileAPI.last());

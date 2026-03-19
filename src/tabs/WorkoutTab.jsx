@@ -6,11 +6,20 @@ import { Icons } from '../components/Icons';
 import { Card, Btn, Field, Sheet, Chip, Progress, ExercisePicker, ValidationWarning, validateWorkout, SuccessToastCtrl } from '../components/ui';
 import { today, ago, fmtShort, fmtFull, uid, calc1RM, calcPlates, PLATES, fmtTimer, convW, wUnit, dUnit, isCardio, toKg, toLbs } from '../utils/helpers';
 import { Undo } from '../utils/undo';
-import { ActiveWorkoutStore } from '../utils/sync';
+import { ActiveWorkoutStore, SocialAPI } from '../utils/sync';
 import { TEMPLATES } from '../data/templates';
 import { ShareCard } from '../utils/share';
-import { RestTimer, PlateCalc, findLastSets } from '../components/dialogs';
+import { RestTimer, RestTimerCtrl, PlateCalc, findLastSets } from '../components/dialogs';
 import { getActiveMultiplier } from './social';
+import { getOverloadSuggestion } from './AnalyticsTab';
+import { checkAndAwardMissions, checkMilestones } from './gamification';
+import { WorkoutCard } from './features';
+
+function YTBtn({yt,size=24}){
+  if(!yt)return null;
+  const url=yt.startsWith("http")?yt:`https://www.youtube.com/watch?v=${yt}`;
+  return <a href={url} target="_blank" rel="noopener noreferrer" onClick={e=>e.stopPropagation()} style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:size,height:size,borderRadius:size/2,background:"rgba(255,0,0,0.15)",color:"#f00",textDecoration:"none",fontSize:size*0.5}}>▶</a>;
+}
 
 export function WorkoutTab({s,d}){
   const [show,setShow]=useState(false);

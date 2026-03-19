@@ -25,3 +25,10 @@ export const wUnit=(units)=>units==="kg"?"kg":"lbs";
 export const dUnit=(units)=>units==="kg"?"km":"mi";
 export const isCardio=(exerciseId,exercises)=>exercises.find(e=>e.id===exerciseId)?.cat==="Cardio";
 export const convW=(v,units)=>units==="kg"?toKg(v):v;
+
+// Shared recharts config
+export const chartCfg={
+  grid:{strokeDasharray:"3 3",stroke:"rgba(255,255,255,0.06)"},
+  axis:{tick:{fill:"rgba(255,255,255,0.4)",fontSize:10},axisLine:false,tickLine:false},
+  tip:{contentStyle:{background:"#1a1a2e",border:"1px solid rgba(255,255,255,0.1)",borderRadius:8,fontSize:12,color:"#fff"},itemStyle:{color:"#fff"}},
+};

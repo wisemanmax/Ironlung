@@ -2,12 +2,13 @@ import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { V, Haptic } from '../utils/theme';
 import { LS } from '../utils/storage';
 import { Icons } from '../components/Icons';
-import { Card, Btn, Field, Sheet, Chip, Progress, Stat, ValidationWarning, validateNutrition, SuccessToastCtrl } from '../components/ui';
-import { today, ago, fmtShort, fmtFull, uid, wUnit } from '../utils/helpers';
+import { Card, Btn, Field, Sheet, Chip, Progress, Stat, ValidationWarning, validateNutrition, SuccessToastCtrl, ConfirmCtrl } from '../components/ui';
+import { today, ago, fmtShort, fmtFull, uid, wUnit, chartCfg } from '../utils/helpers';
 import { Undo } from '../utils/undo';
 import { FOODS, FOOD_CATS } from '../data/foods';
-import { FoodSearch } from '../components/dialogs';
+import { FoodSearch, BarcodeScanner, useNutritionStreak } from '../components/dialogs';
 import { ShareCard } from '../utils/share';
+import { checkAndAwardMissions } from './gamification';
 
 export function NutritionTab({s,d}){
   const [show,setShow]=useState(false);

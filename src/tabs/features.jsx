@@ -5,7 +5,7 @@ import { V, Haptic } from '../utils/theme';
 import { LS } from '../utils/storage';
 import { Icons } from '../components/Icons';
 import { Card, Btn, Field, Sheet, Chip, Stat, Progress, Skeleton, SkeletonCard, SuccessToastCtrl, ConfirmCtrl, MsgBannerCtrl } from '../components/ui';
-import { today, ago, fmtShort, fmtFull, uid, calc1RM, calcPlates, PLATES, convW, wUnit, dUnit, isCardio, toKg, toLbs, friendDisplayName } from '../utils/helpers';
+import { today, ago, fmtShort, fmtFull, uid, calc1RM, calcPlates, PLATES, convW, wUnit, dUnit, isCardio, toKg, toLbs, friendDisplayName, chartCfg } from '../utils/helpers';
 import { CloudSync, SocialAPI, SYNC_URL, APP_VERSION } from '../utils/sync';
 import { Undo } from '../utils/undo';
 import { ShareCard } from '../utils/share';
