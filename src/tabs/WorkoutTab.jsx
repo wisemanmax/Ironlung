@@ -10,7 +10,7 @@ import { ActiveWorkoutStore, SocialAPI } from '../utils/sync';
 import { TEMPLATES } from '../data/templates';
 import { ShareCard } from '../utils/share';
 import { RestTimer, RestTimerCtrl, PlateCalc, findLastSets, usePRs } from '../components/dialogs';
-import { getActiveMultiplier } from './social';
+import { getActiveMultiplier, addXPBonus } from './social';
 import { getOverloadSuggestion } from './AnalyticsTab';
 import { checkAndAwardMissions, checkMilestones } from './gamification';
 import { WorkoutCard } from './features';
