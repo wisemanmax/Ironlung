@@ -3288,12 +3288,12 @@ export function AICoachChat({s}){
           <input value={apiKeyInput||""} onChange={e=>setApiKeyInput(e.target.value)} placeholder="Paste Anthropic API key for unlimited"
             type="password" style={{flex:1,padding:"8px 10px",background:V.card,border:`1px solid ${V.cardBorder}`,
               borderRadius:8,color:V.text,fontSize:10,outline:"none",fontFamily:V.mono}}/>
-          <button onClick={()=>{if(apiKeyInput?.trim()){LS.set("ft-anthropic-key",apiKeyInput.trim());SuccessToastCtrl.show("API key saved");}}}
+          <button onClick={async ()=>{if(apiKeyInput?.trim()){await LS.setSecure("ft-anthropic-key",apiKeyInput.trim());SuccessToastCtrl.show("API key saved");}}}
             style={{padding:"6px 10px",borderRadius:6,background:`${V.accent}15`,border:"none",cursor:"pointer",fontSize:10,fontWeight:700,color:V.accent}}>Save</button>
         </div>
       )}
       {userKey&&(
-        <button onClick={()=>{LS.set("ft-anthropic-key",null);SuccessToastCtrl.show("API key removed");}}
+        <button onClick={async ()=>{await LS.setSecure("ft-anthropic-key",null);SuccessToastCtrl.show("API key removed");}}
           style={{padding:"4px 10px",borderRadius:6,background:"rgba(255,255,255,0.04)",border:`1px solid ${V.cardBorder}`,
             cursor:"pointer",fontSize:9,color:V.text3,fontFamily:V.font,marginBottom:8,alignSelf:"flex-start"}}>Remove API Key</button>
       )}
