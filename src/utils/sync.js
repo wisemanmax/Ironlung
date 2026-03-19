@@ -51,7 +51,7 @@ export const SyncQueue={
     const getAll=tx.objectStore("queue").getAll();
     return new Promise(resolve=>{
       getAll.onsuccess=async()=>{
-        const items=getAll.result||[];let synced=0;
+        const items=getAll.result||[];let synced=0;let discarded=0;
         // Read current session token at replay time so queued items pass auth
         const sessionToken=LS.get("ft-session-token");
         const headers={"Content-Type":"application/json"};
@@ -59,16 +59,18 @@ export const SyncQueue={
         for(const item of items){
           try{const res=await fetch(item.url,{method:"POST",headers,body:item.body});
           if(res.ok){const delTx=db.transaction("queue","readwrite");delTx.objectStore("queue").delete(item.id);synced++;}
-          else if(res.status===401){resolve({synced,remaining:items.length-synced,authError:true});return;}
+          else if(res.status===401){resolve({synced,remaining:items.length-synced-discarded,authError:true});return;}
           // #12: Drop permanently-invalid items (400/403/404/422) — previously left in queue causing infinite retry.
           // A 5xx or network error is transient so we leave those for next sync.
           else if(res.status===400||res.status===403||res.status===404||res.status===409||res.status===422){
             const delTx=db.transaction("queue","readwrite");delTx.objectStore("queue").delete(item.id);
+            discarded++;
             console.warn("SyncQueue: discarding permanently-failed item",item.id,"status",res.status);
           }}catch(e){console.warn("Error:",e);}
         }
-        LS.set("ft-pending-sync",Math.max(0,items.length-synced));
-        resolve({synced,remaining:items.length-synced});
+        const remaining=Math.max(0,items.length-synced-discarded);
+        LS.set("ft-pending-sync",remaining);
+        resolve({synced,remaining});
       };
       getAll.onerror=()=>resolve({synced:0,remaining:0});
     });}catch(e){return{synced:0,remaining:0};}
@@ -295,7 +297,7 @@ export const CloudSync={
       if(res.status===401){
         // I10: Session expired — show actionable banner instead of silently queueing
         LS.set("ft-session-token",null);
-        if(typeof MsgBannerCtrl!=="undefined")MsgBannerCtrl.push({name:"Session Expired",text:"Tap to sign in again — your data is saved locally.",type:"system"});
+        MsgBannerCtrl_ref.push({name:"Session Expired",text:"Tap to sign in again — your data is saved locally.",type:"system"});
         syncInFlight=false;return;
       }
       if(!res.ok)throw new Error("Push failed");

@@ -43,11 +43,11 @@ function UndoToast({d}){
   },[item,remaining>0]);
   if(!item)return null;
   const doUndo=()=>{
-    const u=Undo.get();if(!u)return;
-    if(u.type==="workout")d({type:"ADD_W",w:u.item});
-    else if(u.type==="nutrition")d({type:"ADD_N",n:u.item});
-    else if(u.type==="body")d({type:"ADD_B",b:u.item});
-    else if(u.type==="photo")d({type:"ADD_PHOTO",photo:u.item});
+    if(!item)return;
+    if(item.type==="workout")d({type:"ADD_W",w:item.item});
+    else if(item.type==="nutrition")d({type:"ADD_N",n:item.item});
+    else if(item.type==="body")d({type:"ADD_B",b:item.item});
+    else if(item.type==="photo")d({type:"ADD_PHOTO",photo:item.item});
     Undo.clear();setItem(null);
     SuccessToastCtrl.show("Restored");
   };
