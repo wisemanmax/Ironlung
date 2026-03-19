@@ -3,7 +3,7 @@ import ReactDOM from 'react-dom';
 import { V, Haptic } from '../utils/theme';
 import { LS } from '../utils/storage';
 import { Icons } from '../components/Icons';
-import { Card, Btn, Field, Sheet, Chip, Progress, ExercisePicker, ValidationWarning, validateWorkout, SuccessToastCtrl } from '../components/ui';
+import { Card, Btn, Field, Sheet, Chip, Progress, ExercisePicker, ValidationWarning, validateWorkout, SuccessToastCtrl, ConfirmDialog } from '../components/ui';
 import { today, ago, fmtShort, fmtFull, uid, calc1RM, calcPlates, PLATES, fmtTimer, convW, wUnit, dUnit, isCardio, toKg, toLbs } from '../utils/helpers';
 import { Undo } from '../utils/undo';
 import { ActiveWorkoutStore, SocialAPI } from '../utils/sync';

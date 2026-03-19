@@ -7,6 +7,7 @@ import { today, ago, fmtShort, fmtFull, uid, wUnit, chartCfg } from '../utils/he
 import { Undo } from '../utils/undo';
 import { FOODS, FOOD_CATS } from '../data/foods';
 import { FoodSearch, BarcodeScanner, useNutritionStreak } from '../components/dialogs';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { ShareCard } from '../utils/share';
 import { checkAndAwardMissions } from './gamification';
 

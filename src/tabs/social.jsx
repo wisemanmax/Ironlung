@@ -9,6 +9,9 @@ import { SocialAPI, SYNC_URL } from '../utils/sync';
 import { ShareCard } from '../utils/share';
 import { BADGE_DEFS, calcEarnedBadges } from '../data/badges';
 import { IRON_RANKS } from '../data/ranks';
+import { HelpBtn } from './features';
+import { IronScoreCard, RankBadge, DailyMissionsCard } from './gamification';
+import { SectionGrid } from './hubs';
 
 export function SocialTab({s,d,unreadMsgCount=0}){
   // Quick stats for display
