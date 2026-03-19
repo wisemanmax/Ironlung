@@ -32,11 +32,6 @@ jobs:
 
       - run: npm run build
 
-      - name: Copy runtime directories into dist
-        run: |
-          cp -r apps dist/apps
-          cp -r thoughts dist/thoughts
-
       - uses: actions/configure-pages@v5
 
       - uses: actions/upload-pages-artifact@v3
