@@ -9,7 +9,7 @@ import { SocialAPI, SYNC_URL } from '../utils/sync';
 import { IRON_RANKS, WAR_EPOCH } from '../data/ranks';
 import { BADGE_DEFS, calcEarnedBadges } from '../data/badges';
 import { ShareCard } from '../utils/share';
-import { getActiveMultiplier, calcIronScore, getShields, useLevelUp } from './social';
+import { getActiveMultiplier, calcIronScore, getShields, useLevelUp, checkStreakShieldAward, checkStreakShieldActivation } from './social';
 import { useStreak } from '../components/dialogs';
 import { HelpBtn } from './features';
 

@@ -6,6 +6,7 @@ import { Icons } from '../components/Icons';
 import { Card, Btn, Chip, Sheet, Stat, Progress } from '../components/ui';
 import { today, ago, fmtShort, calc1RM, convW, wUnit, isCardio, chartCfg } from '../utils/helpers';
 import { ShareCard } from '../utils/share';
+import { ALL_MUSCLES, MUSCLE_MAP } from './features';
 
 export function getOverloadSuggestion(exerciseId, workouts, units){
   // Find last 3 sessions with this exercise

@@ -25,12 +25,13 @@ export function BodyTab({s,d}){
   const [showMeasurements,setShowMeasurements]=useState(false);
 
   const save=()=>{
-    d({type:"ADD_B",b:{id:uid(),date:form.date,
+    const b={id:uid(),date:form.date,
       weight:parseFloat(form.weight)||0,bf:parseFloat(form.bf)||0,
       waist:parseFloat(form.waist)||0,hips:parseFloat(form.hips)||0,
       chest:parseFloat(form.chest)||0,neck:parseFloat(form.neck)||0,
       arms:parseFloat(form.arms)||0,thighs:parseFloat(form.thighs)||0,
-      calves:parseFloat(form.calves)||0}});
+      calves:parseFloat(form.calves)||0};
+    d({type:"ADD_B",b});
     Haptic.medium();SuccessToastCtrl.show("Logged ✓");
     setTimeout(()=>checkAndAwardMissions({...s,body:[b,...s.body]},d),400);
     setShow(false);
