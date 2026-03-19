@@ -10,6 +10,7 @@ import { ActiveWorkoutStore } from '../utils/sync';
 import { TEMPLATES } from '../data/templates';
 import { ShareCard } from '../utils/share';
 import { RestTimer, PlateCalc, findLastSets } from '../components/dialogs';
+import { getActiveMultiplier } from './social';
 
 export function WorkoutTab({s,d}){
   const [show,setShow]=useState(false);

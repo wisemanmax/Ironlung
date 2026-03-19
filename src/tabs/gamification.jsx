@@ -9,6 +9,7 @@ import { SocialAPI, SYNC_URL } from '../utils/sync';
 import { IRON_RANKS, WAR_EPOCH } from '../data/ranks';
 import { BADGE_DEFS, calcEarnedBadges } from '../data/badges';
 import { ShareCard } from '../utils/share';
+import { getActiveMultiplier } from './social';
 
 export function IronScoreCard({s,compact,showShields}){
   const {xp,rank,nextRank,xpIntoRank,xpForNext,pct,streak}=useMemo(()=>calcIronScore(s),[s.workouts,s.nutrition,s.photos,s.checkins,s.body]);

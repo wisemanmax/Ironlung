@@ -9,6 +9,7 @@ import { CloudSync } from '../utils/sync';
 import { ShareCard } from '../utils/share';
 import { BADGE_DEFS, calcEarnedBadges } from '../data/badges';
 import { calcReadiness, useStreak, usePRs } from '../components/dialogs';
+import { getActiveMultiplier } from './social';
 
 export function HomeTab({s,d}){
   const [shareCard,setShareCard]=useState(false);
