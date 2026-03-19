@@ -4,12 +4,15 @@ import { V, Haptic } from '../utils/theme';
 import { LS } from '../utils/storage';
 import { Icons } from '../components/Icons';
 import { Card, Btn, Chip, Stat, Skeleton, SkeletonCard, Progress, Sheet, Field, SuccessToastCtrl } from '../components/ui';
-import { today, ago, fmtShort, fmtFull, uid, calc1RM, convW, wUnit, dUnit } from '../utils/helpers';
+import { today, ago, fmtShort, fmtFull, uid, calc1RM, convW, wUnit, dUnit, isCardio, chartCfg } from '../utils/helpers';
 import { CloudSync } from '../utils/sync';
 import { ShareCard } from '../utils/share';
 import { BADGE_DEFS, calcEarnedBadges } from '../data/badges';
-import { calcReadiness, useStreak, usePRs } from '../components/dialogs';
-import { getActiveMultiplier } from './social';
+import { calcReadiness, useStreak, usePRs, ReadinessCard } from '../components/dialogs';
+import { getActiveMultiplier, getXPBonus } from './social';
+import { SyncStatus, PROGRAMS, HelpBtn, WorkoutCard } from './features';
+import { calcStrengthScore } from './AnalyticsTab';
+import { DailyMissionsCard } from './gamification';
 
 export function HomeTab({s,d}){
   const [shareCard,setShareCard]=useState(false);

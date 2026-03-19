@@ -4,7 +4,7 @@ import { V } from '../utils/theme';
 import { LS } from '../utils/storage';
 import { Icons } from '../components/Icons';
 import { Card, Btn, Chip, Sheet, Stat, Progress } from '../components/ui';
-import { today, ago, fmtShort, calc1RM, convW, wUnit, isCardio } from '../utils/helpers';
+import { today, ago, fmtShort, calc1RM, convW, wUnit, isCardio, chartCfg } from '../utils/helpers';
 import { ShareCard } from '../utils/share';
 
 export function getOverloadSuggestion(exerciseId, workouts, units){
@@ -1284,8 +1284,8 @@ export function AnalyticsTab({s}){
 // ═══════════════════════════════════════
 //  CALENDAR TAB
 // ═══════════════════════════════════════
-const WORKOUT_TYPES = ["Rest","Chest","Back","Legs","Shoulders","Arms","Core","Cardio","Push","Pull","Upper","Lower","Full Body","Custom"];
-const typeColors = {
+export const WORKOUT_TYPES = ["Rest","Chest","Back","Legs","Shoulders","Arms","Core","Cardio","Push","Pull","Upper","Lower","Full Body","Custom"];
+export const typeColors = {
   "Rest":"#333","Chest":V.accent,"Back":V.accent2,"Legs":V.purple,"Shoulders":V.warn,
   "Arms":"#ff6b9d","Core":"#ffd93d","Cardio":"#ff6b6b","Push":V.accent,"Pull":V.accent2,
   "Upper":"#e879f9","Lower":"#fb923c","Full Body":"#34d399","Custom":"#94a3b8",

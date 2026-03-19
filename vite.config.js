@@ -1,4 +1,5 @@
 import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
 import { readFileSync, unlinkSync } from 'fs'
 import { resolve } from 'path'
 
@@ -59,7 +60,7 @@ function inlineCssPlugin() {
 
 export default defineConfig({
   base: './',
-  plugins: [inlineCssPlugin()],
+  plugins: [react(), inlineCssPlugin()],
   build: {
     outDir: 'dist',
     assetsDir: 'assets',

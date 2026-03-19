@@ -7,6 +7,9 @@ import { Card, Btn, Field, Sheet, Chip, Progress } from './ui';
 import { FOODS, FOOD_CATS } from '../data/foods';
 import { PLATES, calcPlates, fmtTimer, today, ago, toKg, toLbs, wUnit, convW } from '../utils/helpers';
 
+// Controller for triggering rest timer auto-start from outside
+export const RestTimerCtrl={_cb:null,register(cb){this._cb=cb;},trigger(){if(this._cb)this._cb();}};
+
 export function RestTimer(){
   const [active,setActive]=useState(false);
   const [secs,setSecs]=useState(90);
