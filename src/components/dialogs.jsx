@@ -5,7 +5,10 @@ import { LS } from '../utils/storage';
 import { Icons } from './Icons';
 import { Card, Btn, Field, Sheet, Chip, Progress } from './ui';
 import { FOODS, FOOD_CATS } from '../data/foods';
-import { PLATES, calcPlates, fmtTimer, today, ago, toKg, toLbs, wUnit, convW } from '../utils/helpers';
+import { PLATES, calcPlates, fmtTimer, today, ago, toKg, toLbs, wUnit, convW, calc1RM, fmtShort } from '../utils/helpers';
+import { SuccessToastCtrl } from './ui';
+import { checkAndAwardMissions } from '../tabs/gamification';
+import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, ReferenceLine } from 'recharts';
 
 // Controller for triggering rest timer auto-start from outside
 export const RestTimerCtrl={_cb:null,register(cb){this._cb=cb;},trigger(){if(this._cb)this._cb();}};
@@ -807,14 +810,14 @@ export function ReadinessTrend({s}){
         <Card style={{padding:14}}>
           <div style={{fontSize:12,color:V.text3,fontWeight:600,marginBottom:10}}>Last 14 Days</div>
           <div style={{height:120}}>
-            <Recharts.ResponsiveContainer width="100%" height="100%">
-              <Recharts.AreaChart data={data}>
-                <Recharts.XAxis dataKey="date" tick={{fontSize:8,fill:V.text3}} tickLine={false} axisLine={false}/>
-                <Recharts.YAxis domain={[0,100]} tick={{fontSize:8,fill:V.text3}} tickLine={false} axisLine={false} width={25}/>
-                <Recharts.Area type="monotone" dataKey="score" stroke={V.accent} fill={`${V.accent}20`} strokeWidth={2}/>
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={data}>
+                <XAxis dataKey="date" tick={{fontSize:8,fill:V.text3}} tickLine={false} axisLine={false}/>
+                <YAxis domain={[0,100]} tick={{fontSize:8,fill:V.text3}} tickLine={false} axisLine={false} width={25}/>
+                <Area type="monotone" dataKey="score" stroke={V.accent} fill={`${V.accent}20`} strokeWidth={2}/>
                 <ReferenceLine y={60} stroke={V.warn} strokeDasharray="3 3" strokeOpacity={0.4}/>
-              </Recharts.AreaChart>
-            </Recharts.ResponsiveContainer>
+              </AreaChart>
+            </ResponsiveContainer>
           </div>
           <div style={{display:"flex",justifyContent:"center",gap:12,marginTop:6}}>
             <span style={{fontSize:9,color:V.text3}}>Above 60 = ready to train</span>

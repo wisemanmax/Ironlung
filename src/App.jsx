@@ -458,6 +458,17 @@ function App(){
     }catch(e){console.warn("Error:",e);}})();
   },[s.workouts,s.nutrition,s.body,s.exercises,s.goals,s.schedule,s.units,s.onboarded,s.photos,s.profile,s.checkins,s.milestones,s.phases,s.injuries,s.syncPrefs,s.a11y,s.loaded]);
 
+  // Wire up MsgBannerCtrl ref so sync.js can show banners
+  useEffect(()=>{setMsgBannerCtrlRef(MsgBannerCtrl);},[]);
+
+  // Expose sync function for service worker background sync
+  useEffect(()=>{
+    if(s.loaded&&s.onboarded&&s.profile?.email){
+      window.__ironlog_sync=()=>CloudSync.push(s);
+    }
+    return()=>{window.__ironlog_sync=null;};
+  },[s.loaded,s.onboarded,s.profile?.email]);
+
   // Sync on app open — push local data to server
   useEffect(()=>{
     if(s.loaded&&s.onboarded&&s.profile?.email){
