@@ -12,6 +12,8 @@ import { ShareCard } from '../utils/share';
 import { BADGE_DEFS, calcEarnedBadges } from '../data/badges';
 import { TEMPLATES } from '../data/templates';
 import { IRON_RANKS } from '../data/ranks';
+import { FOODS } from '../data/foods';
+import { AuthToken } from '../utils/auth';
 import { calcReadiness, useStreak, usePRs, useNutritionStreak } from '../components/dialogs';
 
 export function OneRMCalc({units}){
