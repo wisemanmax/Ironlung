@@ -6,6 +6,7 @@ import { Icons } from '../components/Icons';
 import { Card, Btn, Field, Sheet, Chip, Stat, Progress, SuccessToastCtrl, MsgBannerCtrl } from '../components/ui';
 import { today, ago, fmtShort, uid, friendDisplayName, convW, wUnit, calc1RM } from '../utils/helpers';
 import { SocialAPI, SYNC_URL } from '../utils/sync';
+import { AuthToken } from '../utils/auth';
 import { IRON_RANKS, WAR_EPOCH } from '../data/ranks';
 import { BADGE_DEFS, calcEarnedBadges } from '../data/badges';
 import { ShareCard } from '../utils/share';
