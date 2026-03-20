@@ -3213,7 +3213,12 @@ export function PhotoCompare({s}){
 
 // ─── AI Coach Chat (Claude API — BYOK + Free Tier) ───
 export function AICoachChat({s}){
-  const userKey=LS.get("ft-anthropic-key");
+  const [userKey,setUserKey]=useState(null);
+  const [keyLoaded,setKeyLoaded]=useState(false);
+  // Load API key from encrypted storage on mount
+  useEffect(()=>{
+    LS.getSecure("ft-anthropic-key").then(k=>{setUserKey(k||null);setKeyLoaded(true);});
+  },[]);
   const defaultMsg=[{role:"assistant",content:userKey
     ?"Hey! I'm your AI coach. Ask me anything about your training, nutrition, or recovery. I have access to all your workout data."
     :"Welcome to AI Coach! To get started, you'll need your own Anthropic API key. Paste it in the field above — it stays on your device and never touches our servers. Get a key at console.anthropic.com."}];
@@ -3290,12 +3295,12 @@ export function AICoachChat({s}){
           <input value={apiKeyInput||""} onChange={e=>setApiKeyInput(e.target.value)} placeholder="Paste Anthropic API key for unlimited"
             type="password" style={{flex:1,padding:"8px 10px",background:V.card,border:`1px solid ${V.cardBorder}`,
               borderRadius:8,color:V.text,fontSize:10,outline:"none",fontFamily:V.mono}}/>
-          <button onClick={async ()=>{if(apiKeyInput?.trim()){await LS.setSecure("ft-anthropic-key",apiKeyInput.trim());SuccessToastCtrl.show("API key saved");}}}
+          <button onClick={async ()=>{if(apiKeyInput?.trim()){await LS.setSecure("ft-anthropic-key",apiKeyInput.trim());setUserKey(apiKeyInput.trim());SuccessToastCtrl.show("API key saved");}}}
             style={{padding:"6px 10px",borderRadius:6,background:`${V.accent}15`,border:"none",cursor:"pointer",fontSize:10,fontWeight:700,color:V.accent}}>Save</button>
         </div>
       )}
       {userKey&&(
-        <button onClick={async ()=>{await LS.setSecure("ft-anthropic-key",null);SuccessToastCtrl.show("API key removed");}}
+        <button onClick={async ()=>{await LS.setSecure("ft-anthropic-key",null);setUserKey(null);SuccessToastCtrl.show("API key removed");}}
           style={{padding:"4px 10px",borderRadius:6,background:"rgba(255,255,255,0.04)",border:`1px solid ${V.cardBorder}`,
             cursor:"pointer",fontSize:9,color:V.text3,fontFamily:V.font,marginBottom:8,alignSelf:"flex-start"}}>Remove API Key</button>
       )}
