@@ -752,8 +752,8 @@ function AdminUserAudit({s}){
               {auditTab==="gamification"&&(()=>{
                 const g=gam||{};
                 const bonus=g.xp_bonus?.total||0;
-                const level=g.last_known_level||1;
-                const rank=IRON_RANKS.find(r=>r.level===level)||IRON_RANKS[0];
+                const totalXP=(detail?.workouts?.length||0)*30+(detail?.nutrition?.length||0)*8+(detail?.checkins?.length||0)*5+(detail?.photos?.length||0)*15+bonus;
+                const rank=[...IRON_RANKS].reverse().find(r=>totalXP>=r.xpNeeded)||IRON_RANKS[0];
                 return(
                   <div style={{display:"flex",flexDirection:"column",gap:8}}>
                     <Card style={{padding:12,border:`1px solid ${rank.color}30`}}>
