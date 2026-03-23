@@ -876,7 +876,7 @@ export function Onboarding({d}){
           </Sheet>
         )}
 
-        <Btn full onClick={()=>setStep(5)} disabled={!profileValid} s={{marginTop:16}}>
+        <Btn full onClick={()=>setStep(6)} disabled={!profileValid} s={{marginTop:16}}>
           Next
         </Btn>
 
