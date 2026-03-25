@@ -435,6 +435,7 @@ export function ProfileEditor({s,d}){
 
 // ─── Admin Panel (only accessible with is_admin=true on server) ───
 export function AdminPanel({s,initialView}){
+  const { isDesktop } = useLayout();
   const [view,setView]=useState(initialView||"dashboard");
   const [dash,setDash]=useState(null);
   const [users,setUsers]=useState([]);

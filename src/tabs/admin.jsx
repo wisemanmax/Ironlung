@@ -279,7 +279,7 @@ function AdminPush({s,d}){
       {/* Quick templates */}
       <div>
         <div style={{fontSize:10,fontWeight:700,color:V.text3,textTransform:"uppercase",letterSpacing:".06em",marginBottom:6}}>Quick Templates</div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
+        <div style={{display:"grid",gridTemplateColumns:isDesktop?"1fr 1fr 1fr":"1fr 1fr",gap:6}}>
           {TEMPLATES.map(t=>(
             <button key={t.label} onClick={()=>{setTitle(t.title);setBody(t.body);}}
               style={{padding:"8px 10px",borderRadius:8,border:`1px solid ${body===t.body?V.accent+"40":V.cardBorder}`,
@@ -579,7 +579,7 @@ function AdminUserAudit({s}){
                 <div style={{display:"flex",flexDirection:"column",gap:8}}>
                   <Card style={{padding:12}}>
                     <div style={{fontSize:11,fontWeight:700,color:V.text,marginBottom:8}}>Bio & Profile</div>
-                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,fontSize:10,color:V.text3}}>
+                    <div style={{display:"grid",gridTemplateColumns:isDesktop?"1fr 1fr 1fr":"1fr 1fr",gap:6,fontSize:10,color:V.text3}}>
                       {[
                         ["Name",`${detail.profile?.first_name||""} ${detail.profile?.last_name||""}`.trim()||"—"],
                         ["DOB",detail.profile?.date_of_birth||"—"],
@@ -838,7 +838,7 @@ function AdminUserAudit({s}){
                 <div style={{display:"flex",flexDirection:"column",gap:8}}>
                   <Card style={{padding:12}}>
                     <div style={{fontSize:11,fontWeight:700,color:V.text,marginBottom:8}}>Goals & Schedule</div>
-                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,fontSize:10}}>
+                    <div style={{display:"grid",gridTemplateColumns:isDesktop?"1fr 1fr 1fr":"1fr 1fr",gap:6,fontSize:10}}>
                       {[
                         ["Calories",`${detail.settings.goals?.cal||"—"} kcal`],
                         ["Protein",`${detail.settings.goals?.protein||"—"}g`],
@@ -1128,7 +1128,7 @@ function AdminXPManager({s}){
       {selUser&&!gLoading&&(
         <Card style={{padding:14}}>
           <div style={{fontSize:12,fontWeight:700,color:V.text,marginBottom:10}}>Override Rank</div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:10}}>
+          <div style={{display:"grid",gridTemplateColumns:isDesktop?"1fr 1fr 1fr":"1fr 1fr",gap:6,marginBottom:10}}>
             {IRON_RANKS.map(r=>(
               <div key={r.level} onClick={()=>setTargetRank(String(r.level))}
                 style={{display:"flex",alignItems:"center",gap:8,padding:"8px 10px",borderRadius:8,cursor:"pointer",
@@ -1637,7 +1637,7 @@ function AdminBusinessValue({s}){
           {/* Hero KPIs */}
           <Card style={{padding:14,background:`linear-gradient(135deg,${V.accent}08,${V.accent2}06)`}}>
             <SectionTitle color={V.accent}>Platform at a Glance</SectionTitle>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+            <div style={{display:"grid",gridTemplateColumns:isDesktop?"1fr 1fr 1fr":"1fr 1fr",gap:8,marginBottom:8}}>
               <Kpi big label="Total Members" value={d.totalUsers.toLocaleString()} icon="👥" color={V.accent}
                 sub={`+${d.newUsers30d} this month`}/>
               <Kpi big label="Active (7d)" value={d.activeUsers7d.toLocaleString()} icon="🔥" color="#f59e0b"
@@ -1771,7 +1771,7 @@ function AdminBusinessValue({s}){
 
           <Card style={{padding:14}}>
             <SectionTitle color={V.accent2}>Engagement KPIs</SectionTitle>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+            <div style={{display:"grid",gridTemplateColumns:isDesktop?"1fr 1fr 1fr":"1fr 1fr",gap:8}}>
               <Kpi label="Avg Workouts/Active User (7d)" value={d.avgWorkoutsPerActiveUser7d} color={V.accent}/>
               <Kpi label="Nutrition Adherence (7d)" value={`${d.nutritionAdherence7d}x`} color={V.warn}
                 sub="nutrition logs per active user"/>
@@ -1822,7 +1822,7 @@ function AdminBusinessValue({s}){
 
           <Card style={{padding:14}}>
             <SectionTitle color="#f43f5e">Top PR Movements (30d)</SectionTitle>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
+            <div style={{display:"grid",gridTemplateColumns:isDesktop?"1fr 1fr 1fr":"1fr 1fr",gap:6}}>
               {(d.topPRs||[]).map((pr,i)=>(
                 <div key={pr.name} style={{padding:"10px 12px",borderRadius:10,
                   background:"rgba(255,255,255,0.02)",border:`1px solid ${COLORS[i%COLORS.length]}20`}}>
@@ -1857,7 +1857,7 @@ function AdminBusinessValue({s}){
 
           <Card style={{padding:14}}>
             <SectionTitle color={V.warn}>Top Member States</SectionTitle>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
+            <div style={{display:"grid",gridTemplateColumns:isDesktop?"1fr 1fr 1fr":"1fr 1fr",gap:6}}>
               {(d.topStates||[]).map((st,i)=>(
                 <div key={st.name} style={{display:"flex",justifyContent:"space-between",alignItems:"center",
                   padding:"8px 10px",borderRadius:8,background:"rgba(255,255,255,0.02)"}}>
@@ -1876,7 +1876,7 @@ function AdminBusinessValue({s}){
 
           <Card style={{padding:14,background:`linear-gradient(135deg,rgba(34,197,94,0.06),rgba(16,185,129,0.04))`}}>
             <SectionTitle color="#22c55e">Retention Overview</SectionTitle>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+            <div style={{display:"grid",gridTemplateColumns:isDesktop?"1fr 1fr 1fr":"1fr 1fr",gap:8,marginBottom:8}}>
               <Kpi big label="7-Day Retention" value={`${d.retentionRate7d}%`} color="#22c55e" icon="🔥"
                 sub={`${d.activeUsers7d} of ${d.totalUsers} users logged a workout`}/>
               <Kpi big label="30-Day Retention" value={`${d.retentionRate30d}%`} color="#f59e0b" icon="📅"
@@ -1956,7 +1956,7 @@ function AdminBusinessValue({s}){
 
           <Card style={{padding:14}}>
             <SectionTitle color="#06b6d4">Social Health</SectionTitle>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+            <div style={{display:"grid",gridTemplateColumns:isDesktop?"1fr 1fr 1fr":"1fr 1fr",gap:8}}>
               <Kpi big label="New Friendships (7d)" value={d.friendships7d} icon="🤝" color="#06b6d4"/>
               <Kpi big label="Social Events (30d)" value={(d.eventBreakdown||[]).reduce((a,e)=>a+e.count,0).toLocaleString()} icon="📡" color={V.accent2}/>
             </div>
@@ -1964,7 +1964,7 @@ function AdminBusinessValue({s}){
 
           <Card style={{padding:14}}>
             <SectionTitle color={V.accent2}>Event Breakdown (30d)</SectionTitle>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
+            <div style={{display:"grid",gridTemplateColumns:isDesktop?"1fr 1fr 1fr":"1fr 1fr",gap:6}}>
               {(d.eventBreakdown||[]).slice(0,8).map((ev,i)=>{
                 const labels={WorkoutLogged:"🏋️ Workouts",PRHit:"🎯 PRs Hit",QuickMessage:"💬 Quick Msgs",
                   RivalAdded:"⚔️ Rivals",GroupChat:"👥 Group Chat",AccountabilitySet:"🤝 Accountability",
@@ -2046,7 +2046,7 @@ function AdminBusinessValue({s}){
 
           <Card style={{padding:14}}>
             <SectionTitle color={V.accent}>Platform XP Intelligence</SectionTitle>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+            <div style={{display:"grid",gridTemplateColumns:isDesktop?"1fr 1fr 1fr":"1fr 1fr",gap:8}}>
               <Kpi label="Avg Streak (90d)" value={`${d.avgStreak}d`} color="#f59e0b" icon="🔥"/>
               <Kpi label="All-time Longest" value={`${d.maxStreak}d`} color="#f43f5e" icon="⚡"/>
               <Kpi label="Total PRs (30d)" value={(d.topPRs||[]).reduce((a,p)=>a+p.count,0)} color={V.accent} icon="🎯"/>
@@ -2145,7 +2145,7 @@ function AdminBusinessValue({s}){
                       <span style={{fontSize:12,fontWeight:700,color}}>{row.goal}</span>
                       <span style={{fontSize:9,color:V.text3}}>{row.count} members</span>
                     </div>
-                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                    <div style={{display:"grid",gridTemplateColumns:isDesktop?"1fr 1fr 1fr":"1fr 1fr",gap:8}}>
                       <div style={{textAlign:"center",padding:"6px",borderRadius:8,background:"rgba(255,255,255,0.03)"}}>
                         <div style={{fontSize:18,fontWeight:900,color,fontFamily:V.mono}}>{row.avgWorkouts30d}</div>
                         <div style={{fontSize:8,color:V.text3}}>avg workouts / 30d</div>
@@ -2200,7 +2200,7 @@ function AdminBusinessValue({s}){
             {(d.topStates||[]).length===0&&(
               <div style={{fontSize:11,color:V.text3,textAlign:"center",padding:"12px 0"}}>No state data yet</div>
             )}
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
+            <div style={{display:"grid",gridTemplateColumns:isDesktop?"1fr 1fr 1fr":"1fr 1fr",gap:6}}>
               {(d.topStates||[]).map((st,i)=>{
                 const max=(d.topStates||[])[0]?.value||1;
                 return(
@@ -2426,7 +2426,7 @@ function AdminBusinessValue({s}){
 
           <Card style={{padding:14}}>
             <SectionTitle color="#f59e0b">Unit Economics</SectionTitle>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+            <div style={{display:"grid",gridTemplateColumns:isDesktop?"1fr 1fr 1fr":"1fr 1fr",gap:8}}>
               {[{l:"LTV (18mo avg)",v:"$126",s:"@ $7/mo × 18 months",c:"#22c55e"},{l:"Target CAC",v:"$32",s:"LTV:CAC ratio ~4:1",c:V.accent},{l:"Payback Period",v:"4.5 mo",s:"CAC ÷ monthly rev",c:V.accent2},{l:"Gross Margin",v:"~85%",s:"Software, minimal COGS",c:V.purple}].map(k=>(
                 <div key={k.l} style={{padding:"12px 10px",borderRadius:12,background:`${k.c}08`,border:`1px solid ${k.c}20`}}>
                   <div style={{fontSize:20,fontWeight:900,color:k.c,fontFamily:V.mono,lineHeight:1}}>{k.v}</div>
@@ -2684,7 +2684,7 @@ function AdminBusinessValue({s}){
           </Card>
           <Card style={{padding:14}}>
             <SectionTitle color={V.accent}>MRR Health Signals</SectionTitle>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+            <div style={{display:"grid",gridTemplateColumns:isDesktop?"1fr 1fr 1fr":"1fr 1fr",gap:8}}>
               {(()=>{
                 const wf=d.mrrWaterfall||[];
                 const latest=wf[wf.length-1]||{};
@@ -2780,7 +2780,7 @@ function AdminBusinessValue({s}){
           <Card style={{padding:14}}>
             <SectionTitle color={V.accent2}>Sticky Features vs. Power Features</SectionTitle>
             <div style={{fontSize:10,color:V.text3,marginBottom:10}}>High adoption + high WAU = core loop · Low adoption = growth opportunity</div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
+            <div style={{display:"grid",gridTemplateColumns:isDesktop?"1fr 1fr 1fr":"1fr 1fr",gap:6}}>
               {[
                 {label:"🏆 Core Loop",desc:"High adoption, daily use",features:["Workout Logging","Streak Tracking"],color:"#22c55e"},
                 {label:"💪 Power Features",desc:"Dedicated users, high value",features:["PR Tracking","Body Measurements"],color:V.accent},
