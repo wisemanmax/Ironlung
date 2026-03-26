@@ -262,6 +262,9 @@ export function Onboarding({d}){
       if(!signInEmail.trim()||!signInEmail.includes("@")){setSignInError("Enter a valid email");return;}
       setSignInLoading(true);setSignInError("");
       try{
+        // Clear stale session tokens from previous login to prevent
+        // expired tokens from causing auth failures on the pull request
+        LS.set("ft-session-token",null);LS.set("ft-session-email",null);LS.set("ft-session-expires",null);
         AuthToken.init(signInEmail);
         const deviceId=uid();LS.set("ft-device-id",deviceId);
         // First pull without PIN to check if account exists and needs PIN
@@ -276,7 +279,7 @@ export function Onboarding({d}){
           setSignInError(result?.error||"No account found with this email.");
         }
       }catch(e){
-        setSignInError("Could not connect. Check your internet and try again.");
+        setSignInError(e.name==="AbortError"?"Request timed out. Check your connection and try again.":"Could not connect. Check your internet and try again.");
       }
       setSignInLoading(false);
       return;
