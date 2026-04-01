@@ -350,11 +350,15 @@ export const CloudSync={
   // Pull all data from server (for restore) — requires PIN if account has one
   pull:async(email,deviceId,pin)=>{
     try{
+      const ctrl=new AbortController();
+      const timer=setTimeout(()=>ctrl.abort(),15000);
       const res=await fetch(`${SYNC_URL}/api/sync/pull`,{
         method:"POST",
         headers:AuthToken.getHeaders(email),
         body:JSON.stringify({email,deviceId,pin:pin||null}),
+        signal:ctrl.signal,
       });
+      clearTimeout(timer);
       const json=await res.json();
       if(res.status===403&&json.pin_required)return{pin_required:true};
       if(res.status===403)return{wrong_pin:true,attempts_remaining:json.attempts_remaining,locked:json.locked};
@@ -365,7 +369,8 @@ export const CloudSync={
       if(json.success)return json;
       return null;
     }catch(e){
-      return{error:"Connection failed"};
+      if(e.name==="AbortError")return{error:"Request timed out. Please try again."};
+      return{error:"Could not reach the server. Please try again later."};
     }
   },
 };

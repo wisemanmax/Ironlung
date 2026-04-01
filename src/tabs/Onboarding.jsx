@@ -276,7 +276,8 @@ export function Onboarding({d}){
           setSignInError(result?.error||"No account found with this email.");
         }
       }catch(e){
-        setSignInError("Could not connect. Check your internet and try again.");
+        console.error("Sign-in error:",e);
+        setSignInError("Something went wrong. Please try again.");
       }
       setSignInLoading(false);
       return;
@@ -300,7 +301,8 @@ export function Onboarding({d}){
         setSignInError("Could not restore. Try again.");
       }
     }catch(e){
-      setSignInError("Connection failed.");
+      console.error("Sign-in PIN error:",e);
+      setSignInError("Something went wrong. Please try again.");
     }
     setSignInLoading(false);
   };
