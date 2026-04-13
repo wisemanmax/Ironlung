@@ -93,6 +93,7 @@ export function Onboarding({d}){
       consentedAt:new Date().toISOString(),
       consentVersion:"1.0",
       deviceId:uid(),
+      app:"ironlog",
     };
 
     // Send to backend (non-blocking — app works regardless)
