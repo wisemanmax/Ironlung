@@ -721,6 +721,31 @@ export function SettingsTab({s,d,isAdmin}){
         </div>
       </Row>
 
+      {/* IRONLOG Ecosystem */}
+      <div style={{gridColumn:isDesktop?"1 / -1":undefined,marginTop:2,padding:"14px 16px",background:V.card,
+        borderRadius:14,border:`1px solid ${V.cardBorder}`}}>
+        <div style={{fontSize:13,fontWeight:700,color:V.text,marginBottom:8}}>IRONLOG Ecosystem</div>
+        <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+          {[{n:"FinanceLog",u:"https://financelog.ironlog.space",i:"\ud83d\udcb8"},
+            {n:"NutritionLog",u:"https://nutrition.ironlog.space",i:"\ud83e\udd57"},
+            {n:"ReminderLog",u:"https://reminderlog.ironlog.space",i:"\u23f0"},
+            {n:"TherapyLog",u:"https://therapylog.ironlog.space",i:"\ud83e\udde0"}
+          ].map(app=>(
+            <a key={app.n} href={app.u} target="_blank" rel="noopener noreferrer"
+              style={{display:"flex",alignItems:"center",gap:6,padding:"8px 12px",borderRadius:10,
+                background:"rgba(255,255,255,0.03)",border:`1px solid ${V.cardBorder}`,
+                textDecoration:"none",fontSize:12,fontWeight:600,color:V.text,
+                transition:"all .15s"}}>
+              <span>{app.i}</span>{app.n}
+            </a>
+          ))}
+        </div>
+        <a href="/Home.html" style={{display:"inline-flex",alignItems:"center",gap:5,marginTop:10,
+          fontSize:11,fontWeight:600,color:V.accent,textDecoration:"none"}}>
+          View all apps →
+        </a>
+      </div>
+
       {/* Donate */}
       <div style={{gridColumn:isDesktop?"1 / -1":undefined,marginTop:6,padding:"16px 18px",background:"linear-gradient(135deg,rgba(34,211,238,0.06),rgba(168,85,247,0.06))",
         borderRadius:14,border:`1px solid rgba(34,211,238,0.12)`,textAlign:"center"}}>
