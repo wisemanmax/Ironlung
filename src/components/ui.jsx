@@ -386,7 +386,7 @@ const Sheet = ({title,onClose,children,footer}) => {
       display:"flex",flexDirection:"column",
       ...(isDesktop?{maxWidth:700,width:"100%",maxHeight:"85vh",borderRadius:20,overflow:"hidden",
         background:V.sheetBg,border:`1px solid ${V.cardBorder}`,boxShadow:"0 20px 60px rgba(0,0,0,0.5)"}:
-        {flex:1}),
+        {flex:1,minHeight:0,overflow:"hidden"}),
     }}>
       {/* Header */}
       <div className="sheet-head" style={{flexShrink:0,display:"flex",alignItems:"center",gap:12,
