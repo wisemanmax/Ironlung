@@ -364,8 +364,8 @@ const Field = ({label,value,onChange,type="text",unit,placeholder,min,max,step,a
 
 const Progress = ({val,max,color=V.accent,h=6}) => (
   <div style={{width:"100%",height:h,background:"rgba(255,255,255,0.05)",borderRadius:h,overflow:"hidden"}}>
-    <div style={{width:`${Math.min(100,(val/max)*100)}%`,height:"100%",
-      background:val>max?V.danger:`linear-gradient(90deg,${color},${color}bb)`,borderRadius:h,transition:"width .4s ease"}}/>
+    <div style={{width:`${max>0?Math.min(100,(val/max)*100):0}%`,height:"100%",
+      background:max>0&&val>max?V.danger:`linear-gradient(90deg,${color},${color}bb)`,borderRadius:h,transition:"width .4s ease"}}/>
   </div>
 );
 

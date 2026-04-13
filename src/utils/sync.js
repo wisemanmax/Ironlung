@@ -9,7 +9,7 @@ import { BADGE_DEFS, calcEarnedBadges } from '../data/badges';
 export const SYNC_URL=LS.get("ft-api-url")||"https://api.ironlog.space";
 
 export const APP_VERSION="9.0";
-export const SW_VERSION="ironlog-v6.0"; // Keep in sync with sw.js
+export const SW_VERSION="ironlog-v7.0"; // Keep in sync with sw.js
 
 export let syncTimer=null;
 export let syncInFlight=false;
@@ -187,7 +187,7 @@ export const SocialAPI={
     try{const r=await fetch(`${SYNC_URL}/api/social?route=groups`,{method:"POST",headers:SocialAPI._headers(email),body:JSON.stringify({route:"groups",email,action:"members",code})});return r.ok?await r.json():null;}catch(e){return null;}
   },
   getGroupEvents:async(email,code,type)=>{
-    try{const r=await fetch(`${SYNC_URL}/api/social?route=group_events&group=${code}&type=${type||""}`,{headers:SocialAPI._headers(email)});return r.ok?await r.json():null;}catch(e){return null;}
+    try{const r=await fetch(`${SYNC_URL}/api/social?route=group_events&group=${encodeURIComponent(code)}&type=${encodeURIComponent(type||"")}`,{headers:SocialAPI._headers(email)});return r.ok?await r.json():null;}catch(e){return null;}
   },
   // Direct Messages
   getDMs:async(email,friendEmail,before,limit)=>{
@@ -250,7 +250,7 @@ export const SocialAPI={
 
   // Profile lookup
   getProfile:async(username)=>{
-    try{const r=await fetch(`${SYNC_URL}/api/social?route=profile&username=${username}`);return r.ok?await r.json():null;}catch(e){return null;}
+    try{const r=await fetch(`${SYNC_URL}/api/social?route=profile&username=${encodeURIComponent(username)}`);return r.ok?await r.json():null;}catch(e){return null;}
   },
 };
 export const CloudSync={

@@ -520,7 +520,7 @@ export function calcReadiness(s){
   }
 
   // 6. Nutrition adherence (+5 bonus)
-  if(tn&&s.goals){
+  if(tn&&s.goals&&s.goals.protein>0){
     const protPct=tn.protein/s.goals.protein;
     if(protPct>=0.8){score+=5;factors.push({label:"Protein on track",val:`${Math.round(protPct*100)}%`,color:V.accent,pts:5});}
   }

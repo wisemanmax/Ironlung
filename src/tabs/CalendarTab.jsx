@@ -4,7 +4,7 @@ import { LS } from '../utils/storage';
 import { Icons } from '../components/Icons';
 import { useLayout } from '../utils/responsive';
 import { Card, Btn, Field, Sheet, Chip, SuccessToastCtrl } from '../components/ui';
-import { today, ago, fmtShort, fmtFull } from '../utils/helpers';
+import { today, ago, fmtShort, fmtFull, isCardio } from '../utils/helpers';
 import { typeColors, WORKOUT_TYPES } from './AnalyticsTab';
 
 export function CalendarTab({s,d}){
@@ -232,7 +232,10 @@ export function CalendarTab({s,d}){
               </div>
               {selWorkout.exercises.map((ex,i)=>{
                 const exInfo=s.exercises.find(e=>e.id===ex.exerciseId);
-                const top=ex.sets.reduce((m,st)=>st.weight>m.weight?st:m,{weight:0,reps:0});
+                const cardio=isCardio(ex.exerciseId,s.exercises);
+                const top=cardio
+                  ?ex.sets.reduce((m,st)=>(parseFloat(st.duration)||0)>(parseFloat(m.duration)||0)?st:m,{duration:0,distance:0})
+                  :ex.sets.reduce((m,st)=>st.weight>m.weight?st:m,{weight:0,reps:0});
                 return(
                   <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",
                     borderBottom:i<selWorkout.exercises.length-1?`1px solid rgba(255,255,255,0.04)`:"none"}}>
@@ -248,7 +251,7 @@ export function CalendarTab({s,d}){
                       )}
                     </div>
                     <div style={{textAlign:"right"}}>
-                      <span style={{fontSize:12,color:V.accent,fontFamily:V.mono}}>{top.weight}×{top.reps}</span>
+                      <span style={{fontSize:12,color:V.accent,fontFamily:V.mono}}>{cardio?`${top.duration}min · ${top.distance}`:`${top.weight}×${top.reps}`}</span>
                       <span style={{fontSize:10,color:V.text3,marginLeft:6}}>{ex.sets.length}s</span>
                     </div>
                   </div>
@@ -273,7 +276,10 @@ export function CalendarTab({s,d}){
               </div>
               {selLastOfType.exercises.map((ex,i)=>{
                 const exInfo=s.exercises.find(e=>e.id===ex.exerciseId);
-                const top=ex.sets.reduce((m,st)=>st.weight>m.weight?st:m,{weight:0,reps:0});
+                const cardio=isCardio(ex.exerciseId,s.exercises);
+                const top=cardio
+                  ?ex.sets.reduce((m,st)=>(parseFloat(st.duration)||0)>(parseFloat(m.duration)||0)?st:m,{duration:0,distance:0})
+                  :ex.sets.reduce((m,st)=>st.weight>m.weight?st:m,{weight:0,reps:0});
                 return(
                   <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 0",
                     borderBottom:i<selLastOfType.exercises.length-1?`1px solid rgba(255,255,255,0.03)`:"none"}}>
@@ -287,7 +293,7 @@ export function CalendarTab({s,d}){
                         </a>
                       )}
                     </div>
-                    <span style={{fontSize:11,color:V.text3,fontFamily:V.mono}}>{top.weight}×{top.reps} · {ex.sets.length}s</span>
+                    <span style={{fontSize:11,color:V.text3,fontFamily:V.mono}}>{cardio?`${top.duration}min · ${top.distance}`:`${top.weight}×${top.reps}`} · {ex.sets.length}s</span>
                   </div>
                 );
               })}

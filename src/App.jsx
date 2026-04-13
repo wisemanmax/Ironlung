@@ -469,7 +469,7 @@ function App(){
       window.__ironlog_sync=()=>CloudSync.push(s);
     }
     return()=>{window.__ironlog_sync=null;};
-  },[s.loaded,s.onboarded,s.profile?.email]);
+  },[s.loaded,s.onboarded,s.profile?.email,s]);
 
   // Sync on app open — push local data to server
   useEffect(()=>{

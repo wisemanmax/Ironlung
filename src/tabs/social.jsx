@@ -1638,6 +1638,7 @@ export function SocialGroups({s,d}){
   const [selGroup,setSelGroup]=useState(null);
   const [members,setMembers]=useState(null);
   const [groupTab,setGroupTab]=useState("board");
+  const [lbMetric,setLbMetric]=useState("streak");
   const [chatMsg,setChatMsg]=useState("");
   const [chatMessages,setChatMessages]=useState([]);
   const [newChal,setNewChal]=useState({name:"",metric:"streak",target:"",endDate:""});
@@ -1727,7 +1728,6 @@ export function SocialGroups({s,d}){
 
       {/* LEADERBOARD TAB */}
       {groupTab==="board"&&(()=>{
-        const [lbMetric,setLbMetric]=useState("streak");
         const LB_METRICS=[{id:"streak",label:"Streak",icon:"🔥",cid:"streak",fmt:(v)=>`${v}d`},{id:"ironscore",label:"XP",icon:"⚡",cid:"ironscore",fmt:(v)=>v>=1000?`${(v/1000).toFixed(1)}k`:String(v)},{id:"big3",label:"Big 3",icon:"🏋️",cid:"big3",fmt:(v)=>`${v}lb`}];
         const getV=(m2,cid)=>parseInt(m2.challenges?.find(c3=>c3.challenge_id===cid)?.value||0);
         const curM=LB_METRICS.find(m2=>m2.id===lbMetric)||LB_METRICS[0];

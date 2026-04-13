@@ -162,6 +162,8 @@ export function WorkoutTab({s,d}){
   const addSet=(ei)=>{Haptic.light();setForm(f=>{const exs=[...f.exercises];const l=exs[ei].sets[exs[ei].sets.length-1];const cardio=isCardio(exs[ei].exerciseId,s.exercises);const newSet=cardio?{duration:l.duration||"",distance:l.distance||"",rpe:l.rpe,done:true}:{weight:l.weight,reps:l.reps,rpe:l.rpe,done:true,warmup:false,drop:false,fail:false};exs[ei]={...exs[ei],sets:[...exs[ei].sets,newSet]};const next={...f,exercises:exs};saveActiveWkt(next);return next;});};
   // I8: Persist active workout to IDB for crash recovery
   const saveActiveWkt=useCallback((f)=>{if(f.exercises?.length>0)ActiveWorkoutStore.save({...f,startTime}).catch(()=>{});},[startTime]);
+  // Auto-save draft to IDB on every form change while workout is open
+  useEffect(()=>{if(show&&form.exercises?.length>0)saveActiveWkt(form);},[show,form,saveActiveWkt]);
   const updSet=(ei,si,k,v)=>{setForm(f=>{const exs=[...f.exercises],sets=[...exs[ei].sets];const prev=sets[si][k];sets[si]={...sets[si],[k]:v};exs[ei]={...exs[ei],sets};
     // #2: Auto-start rest timer when reps filled (not for cardio)
     if(k==="reps"&&!prev&&v&&!sets[si].warmup&&!isCardio(exs[ei].exerciseId,s.exercises))setTimeout(()=>RestTimerCtrl.trigger(),100);

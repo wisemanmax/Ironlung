@@ -3,11 +3,13 @@ import { V, Haptic } from '../utils/theme';
 import { LS } from '../utils/storage';
 import { Icons } from '../components/Icons';
 import { Card, Btn, Field, Chip } from '../components/ui';
-import { uid } from '../utils/helpers';
+import { uid, today } from '../utils/helpers';
 import { CloudSync, SYNC_URL } from '../utils/sync';
-import { SessionManager } from '../utils/auth';
+import { AuthToken, SessionManager } from '../utils/auth';
 import { SentryUtil } from '../utils/sentry';
 import { defaultExercises } from '../data/exercises';
+import { defaultSchedule } from '../state/reducer';
+import { TOSContent, PrivacyContent } from './SettingsTab';
 import { genDemo } from '../data/demo';
 import { useLayout } from '../utils/responsive';
 
