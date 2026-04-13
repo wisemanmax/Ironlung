@@ -50,9 +50,9 @@ export function CalendarTab({s,d}){
 
   // Get workout type for a date
   const getType=(dateStr)=>{
-    if(s.schedule.overrides[dateStr])return s.schedule.overrides[dateStr];
+    if((s.schedule.overrides||{})[dateStr])return s.schedule.overrides[dateStr];
     const dow=new Date(dateStr+"T12:00:00").getDay();
-    return s.schedule.weekly[dow]||"Rest";
+    return (s.schedule.weekly||{})[dow]||"Rest";
   };
 
   // Get the workout done on a date

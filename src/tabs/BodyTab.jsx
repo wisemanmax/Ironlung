@@ -15,7 +15,9 @@ export function parseHeightToM(h){
   const hs=String(h).trim();
   const cm=hs.match(/^([\d.]+)\s*cm$/i);if(cm)return parseFloat(cm[1])/100;
   const fi=hs.match(/^(\d+)['\s](\d+)/);if(fi)return(parseInt(fi[1])*12+parseInt(fi[2]))*0.0254;
-  const ff=hs.match(/^(\d+)'?$/);if(ff)return parseInt(ff[1])*0.3048;
+  const ff=hs.match(/^(\d+)'$/);if(ff)return parseInt(ff[1])*0.3048; // require trailing apostrophe for feet
+  // Bare number: treat as inches if ≤96 (8ft), cm if >96
+  const bare=hs.match(/^([\d.]+)$/);if(bare){const v=parseFloat(bare[1]);return v>96?v/100:v*0.0254;}
   return null;
 }
 

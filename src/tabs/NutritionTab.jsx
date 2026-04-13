@@ -117,6 +117,7 @@ export function NutritionTab({s,d}){
   const tCal=todayN?.cal||0,tProt=todayN?.protein||0,tCarbs=todayN?.carbs||0,tFat=todayN?.fat||0;
   const calGoal=s.goals?.cal||2400,protGoal=s.goals?.protein||180;
   const calPct=Math.min(100,Math.round(tCal/calGoal*100)),protPct=Math.min(100,Math.round(tProt/protGoal*100));
+  const nutritionStreak=useNutritionStreak(s.nutrition);
 
   return(
     <div style={{display:"flex",flexDirection:"column",gap:12,maxWidth:isDesktop?700:"100%",margin:isDesktop?"0 auto":0}}>
@@ -125,7 +126,7 @@ export function NutritionTab({s,d}){
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
           <div style={{display:"flex",alignItems:"center",gap:8}}>
             <span style={{fontSize:11,fontWeight:700,color:V.text}}>Today</span>
-            {(()=>{const ns=useNutritionStreak(s.nutrition);return ns>0?<span style={{fontSize:9,fontWeight:700,padding:"1px 6px",borderRadius:4,background:"rgba(251,191,36,0.12)",color:"#fbbf24"}}>🥗 {ns}d streak</span>:null;})()}
+            {nutritionStreak>0&&<span style={{fontSize:9,fontWeight:700,padding:"1px 6px",borderRadius:4,background:"rgba(251,191,36,0.12)",color:"#fbbf24"}}>🥗 {nutritionStreak}d streak</span>}
           </div>
           {/* #3: Deficit/surplus indicator — vs TDEE if set, else vs goal */}
           {tCal>0?(()=>{

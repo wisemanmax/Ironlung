@@ -98,6 +98,8 @@ export function SocialFeed({s,d}){
   const loadFeed=(silent)=>{const em=emailRef.current;if(!silent)setLoadErr(false);if(em){
     SocialAPI.getFeed(em).then(r=>{
       if(r){
+        // Initialize lastSeenIdRef on first load so new-post detection works immediately
+        if(!lastSeenIdRef.current&&r.events?.length>0)lastSeenIdRef.current=r.events[0].id;
         // ── T3 #11: detect new posts since last seen ──
         if(lastSeenIdRef.current&&r.events){
           const newOnes=r.events.filter(ev=>!ev.isOwn&&ev.id!==lastSeenIdRef.current&&
@@ -1127,59 +1129,62 @@ export function IMConversation({s,email,displayName,friend,onBack}){
 
   // Bug 8: Poll for new messages every 8s while in conversation
   const lastMsgTsRef=useRef(null);
+  const dmPollRef=useRef(null);
   useEffect(()=>{
-    const poll=setInterval(()=>{
-      SocialAPI.getDMs(email,friend.email).then(r=>{
-        if(!r?.messages)return;
-        const lastFriendRead=r.friendLastRead||null;
-        const incoming=(r.messages||[]).map(m=>({
-          ...m,imageData:m.data?.imageData||m.imageData||null,
-          text:(m.data?.imageData)?"📷 Photo":(m.text||""),
-          read:m.isOwn&&lastFriendRead&&new Date(m.ts)<=new Date(lastFriendRead)
-        }));
-        // Only update if newest message is newer than what we have
-        const serverNewest=incoming.slice(-1)[0]?.ts;
-        const localNewest=lastMsgTsRef.current;
-        const latestIsFriend=incoming.slice(-1)[0]&&!(incoming.slice(-1)[0].isOwn||incoming.slice(-1)[0].from===email);
-        // Fix 10: show typing indicator briefly when friend just sent something new
-        if(serverNewest&&serverNewest!==localNewest&&latestIsFriend){
-          setTyping(true);
-          if(typingTimeoutRef.current)clearTimeout(typingTimeoutRef.current);
-          typingTimeoutRef.current=setTimeout(()=>setTyping(false),1200);
-        }
-        if(serverNewest&&serverNewest!==localNewest){
-          lastMsgTsRef.current=serverNewest;
-          // Fix 4+5: merge — keep optimistic local messages & older loaded history
-          setMessages(prev=>{
-            // Keep any "older than server's window" messages already loaded
-            const serverOldest=incoming[0]?.ts||"9999";
-            const olderLocal=prev.filter(m=>m.ts<serverOldest);
-            // Keep optimistic messages (own, no server id yet) newer than server newest
-            const optimistic=prev.filter(m=>(m.isOwn||m.from===email)&&m.ts>serverNewest&&m.imageData);
-            const merged=[...olderLocal,...incoming,...optimistic];
-            // Deduplicate by id keeping latest
-            const seen=new Map();
-            merged.forEach(m=>{if(!seen.has(m.id)||m.ts>seen.get(m.id).ts)seen.set(m.id,m);});
-            const final=[...seen.values()].sort((a,b)=>a.ts.localeCompare(b.ts)).slice(-200);
-            LS.set(`ft-dm-${friend.email}`,final);
-            return final;
-          });
-          // Auto-scroll only if we're near the bottom
-          const list=listRef.current;
-          if(list){const nearBottom=list.scrollHeight-list.scrollTop-list.clientHeight<80;if(nearBottom)scrollToBottom(true);}
-          SocialAPI.markDMsRead(email,friend.email);
-          LS.set(`ft-last-read-${friend.email}`,new Date().toISOString());
-          LS.set(`ft-unread-${friend.email}`,0);
-        }
-      });
-    },document.visibilityState==="visible"?8000:90000);
-    // Restart at correct rate on visibility change
-    const dmVisHandler=()=>{
-      clearInterval(poll);
-      // poll immediately on return to foreground — handled by restart
+    const startPoll=()=>{
+      if(dmPollRef.current)clearInterval(dmPollRef.current);
+      const rate=document.visibilityState==="visible"?8000:90000;
+      dmPollRef.current=setInterval(()=>{
+        SocialAPI.getDMs(email,friend.email).then(r=>{
+          if(!r?.messages)return;
+          const lastFriendRead=r.friendLastRead||null;
+          const incoming=(r.messages||[]).map(m=>({
+            ...m,imageData:m.data?.imageData||m.imageData||null,
+            text:(m.data?.imageData)?"📷 Photo":(m.text||""),
+            read:m.isOwn&&lastFriendRead&&new Date(m.ts)<=new Date(lastFriendRead)
+          }));
+          // Only update if newest message is newer than what we have
+          const serverNewest=incoming.slice(-1)[0]?.ts;
+          const localNewest=lastMsgTsRef.current;
+          const latestIsFriend=incoming.slice(-1)[0]&&!(incoming.slice(-1)[0].isOwn||incoming.slice(-1)[0].from===email);
+          // Fix 10: show typing indicator briefly when friend just sent something new
+          if(serverNewest&&serverNewest!==localNewest&&latestIsFriend){
+            setTyping(true);
+            if(typingTimeoutRef.current)clearTimeout(typingTimeoutRef.current);
+            typingTimeoutRef.current=setTimeout(()=>setTyping(false),1200);
+          }
+          if(serverNewest&&serverNewest!==localNewest){
+            lastMsgTsRef.current=serverNewest;
+            // Fix 4+5: merge — keep optimistic local messages & older loaded history
+            setMessages(prev=>{
+              // Keep any "older than server's window" messages already loaded
+              const serverOldest=incoming[0]?.ts||"9999";
+              const olderLocal=prev.filter(m=>m.ts<serverOldest);
+              // Keep optimistic messages (own, no server id yet) newer than server newest
+              const optimistic=prev.filter(m=>(m.isOwn||m.from===email)&&m.ts>serverNewest&&m.imageData);
+              const merged=[...olderLocal,...incoming,...optimistic];
+              // Deduplicate by id keeping latest
+              const seen=new Map();
+              merged.forEach(m=>{if(!seen.has(m.id)||m.ts>seen.get(m.id).ts)seen.set(m.id,m);});
+              const final=[...seen.values()].sort((a,b)=>a.ts.localeCompare(b.ts)).slice(-200);
+              LS.set(`ft-dm-${friend.email}`,final);
+              return final;
+            });
+            // Auto-scroll only if we're near the bottom
+            const list=listRef.current;
+            if(list){const nearBottom=list.scrollHeight-list.scrollTop-list.clientHeight<80;if(nearBottom)scrollToBottom(true);}
+            SocialAPI.markDMsRead(email,friend.email);
+            LS.set(`ft-last-read-${friend.email}`,new Date().toISOString());
+            LS.set(`ft-unread-${friend.email}`,0);
+          }
+        });
+      },rate);
     };
+    startPoll();
+    // Restart at correct rate on visibility change
+    const dmVisHandler=()=>startPoll();
     document.addEventListener("visibilitychange",dmVisHandler);
-    return()=>{clearInterval(poll);document.removeEventListener("visibilitychange",dmVisHandler);};
+    return()=>{clearInterval(dmPollRef.current);document.removeEventListener("visibilitychange",dmVisHandler);};
   },[email,friend.email]);
 
   const handleImg=async(e)=>{

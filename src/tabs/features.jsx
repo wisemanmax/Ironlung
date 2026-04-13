@@ -1847,7 +1847,7 @@ export function WorkoutCard({workout,s}){
     workout.exercises.slice(0,5).forEach((ex,i)=>{
       const y=198+i*36;
       const name=s.exercises.find(e=>e.id===ex.exerciseId)?.name||ex.exerciseId;
-      const best=Math.max(...ex.sets.map(st=>st.weight));
+      const best=ex.sets.length>0?Math.max(...ex.sets.map(st=>st.weight)):0;
       ctx.fillStyle="#ddd";ctx.font="14px -apple-system, sans-serif";
       ctx.fillText(name,24,y);
       ctx.fillStyle="#22d3ee";ctx.font="bold 14px -apple-system, sans-serif";

@@ -495,7 +495,7 @@ function App(){
     
     const td=today();
     const dow=new Date().getDay();
-    const todayType=s.schedule.overrides[td]||s.schedule.weekly[dow]||"Rest";
+    const todayType=(s.schedule.overrides||{})[td]||(s.schedule.weekly||{})[dow]||"Rest";
     const hasWorkout=s.workouts.some(w=>w.date===td);
     const hasCheckin=(s.checkins||[]).some(c=>c.date===td);
     const todayNutrition=s.nutrition.find(n=>n.date===td);
