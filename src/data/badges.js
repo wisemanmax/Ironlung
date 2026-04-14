@@ -32,6 +32,16 @@ export const BADGE_DEFS=[
   {id:"social_group",icon:"🏅",name:"Group Leader",desc:"Create a group",cat:"Social"},
   {id:"checkin_7",icon:"✅",name:"Check-In Habit",desc:"Check in 7 days straight",cat:"Consistency"},
   {id:"early_adopter",icon:"🚀",name:"Early Adopter",desc:"One of the first IRONLOG users",cat:"Special"},
+  // Duel badges
+  {id:"duel_first",icon:"⚔️",name:"First Blood",desc:"Win your first duel",cat:"Competitive"},
+  {id:"duel_5",icon:"⚔️",name:"Duelist",desc:"Win 5 duels",cat:"Competitive"},
+  {id:"duel_10",icon:"🗡️",name:"Gladiator",desc:"Win 10 duels",cat:"Competitive"},
+  {id:"duel_25",icon:"🏆",name:"Champion",desc:"Win 25 duels",cat:"Competitive"},
+  {id:"duel_streak_3",icon:"🔥",name:"Hot Streak",desc:"Win 3 duels in a row",cat:"Competitive"},
+  // War badges
+  {id:"war_3streak",icon:"🔥",name:"War Machine",desc:"3 weekly war wins in a row",cat:"Competitive"},
+  {id:"war_5streak",icon:"⚡",name:"Unstoppable",desc:"5 weekly war wins in a row",cat:"Competitive"},
+  {id:"war_10streak",icon:"👑",name:"War Legend",desc:"10 weekly war wins in a row",cat:"Competitive"},
 ];
 // Check which badges are earned given current state
 export function calcEarnedBadges(s){
@@ -61,6 +71,15 @@ export function calcEarnedBadges(s){
     social_3friends:friendCount>=3,social_group:isGroupCreator,
     checkin_7:checkinStreak>=7,
     early_adopter:wCount>=1, // everyone who has used the app gets this
+    // Duel + war badges
+    duel_first:(LS.get("ft-duel-record")||{}).wins>=1,
+    duel_5:(LS.get("ft-duel-record")||{}).wins>=5,
+    duel_10:(LS.get("ft-duel-record")||{}).wins>=10,
+    duel_25:(LS.get("ft-duel-record")||{}).wins>=25,
+    duel_streak_3:(LS.get("ft-duel-streak")||0)>=3,
+    war_3streak:(LS.get("ft-war-streak")||0)>=3,
+    war_5streak:(LS.get("ft-war-streak")||0)>=5,
+    war_10streak:(LS.get("ft-war-streak")||0)>=10,
   };
   // Persist earned dates
   const stored=LS.get("ft-badge-dates")||{};

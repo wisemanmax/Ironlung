@@ -3,7 +3,7 @@ import ReactDOM from 'react-dom';
 import { V, Haptic } from '../utils/theme';
 import { LS } from '../utils/storage';
 import { Icons } from '../components/Icons';
-import { Card, Btn, Field, Sheet, Chip, Stat, Progress, SuccessToastCtrl, MsgBannerCtrl } from '../components/ui';
+import { Card, Btn, Field, Sheet, Chip, Stat, Progress, SkeletonCard, SuccessToastCtrl, MsgBannerCtrl, ConfirmCtrl } from '../components/ui';
 import { today, ago, fmtShort, uid, friendDisplayName, convW, wUnit, calc1RM } from '../utils/helpers';
 import { SocialAPI, SYNC_URL } from '../utils/sync';
 import { AuthToken } from '../utils/auth';
@@ -905,12 +905,24 @@ export function SocialDuels({s,d}){
     const f=selFriend;
     const duel={id:uid(),friendEmail:f.email,friendName:friendDisplayName(f),
       metric:selMetric,days:selDays,startDate:today(),
-      endDate:ago(-selDays),status:"active",resultSeen:false,
+      endDate:ago(-selDays),status:"pending",resultSeen:false,
       myStartVal:getMyVal(selMetric),theirVal:parseInt(f.challenges?.find(c=>c.challenge_id===selMetric)?.value)||0};
     saveActive([...active,duel]);
-    try{SocialAPI.logEvent(email,"DuelStarted",{to:f.email,metric:selMetric,days:selDays,name:myName},"friends");}catch(e){}
+    try{SocialAPI.logEvent(email,"DuelInvite",{to:f.email,metric:selMetric,days:selDays,name:myName,duelId:duel.id},"private");}catch(e){}
     setShowNew(false);setSelFriend(null);setRematchFriend(null);
-    SuccessToastCtrl.show(`⚔️ Duel started with ${friendDisplayName(f)}!`);
+    SuccessToastCtrl.show(`⚔️ Challenge sent to ${friendDisplayName(f)}!`);
+  };
+
+  // Accept incoming duel (called from notifications)
+  const acceptDuel=(notif)=>{
+    const meta=notif.metadata||{};
+    const duel={id:meta.duelId||uid(),friendEmail:meta.from,friendName:meta.name||meta.from?.split("@")[0],
+      metric:meta.metric||"streak",days:meta.days||7,startDate:today(),
+      endDate:ago(-(meta.days||7)),status:"active",resultSeen:false,
+      myStartVal:getMyVal(meta.metric||"streak"),theirVal:0};
+    saveActive([...active,duel]);
+    SocialAPI.logEvent(email,"DuelAccepted",{to:meta.from,metric:meta.metric,name:myName},"private");
+    SuccessToastCtrl.show(`⚔️ Duel accepted! Let's go!`);
   };
 
   const claimResult=(duel,iWon,tied)=>{
@@ -921,11 +933,30 @@ export function SocialDuels({s,d}){
     else cur.losses=(cur.losses||0)+1;
     LS.set("ft-duel-record",cur);
     setRecord({...cur});
-    // XP for wins
-    if(iWon){addXPBonus(50,"Duel Victory 🏆");SuccessToastCtrl.show("Victory! +50 XP 🏆");}
+    // Track duel win streak for badges
+    if(iWon){
+      const streak2=(LS.get("ft-duel-streak")||0)+1;
+      LS.set("ft-duel-streak",streak2);
+      addXPBonus(50,"Duel Victory 🏆");SuccessToastCtrl.show(`Victory! +50 XP 🏆${streak2>=3?` · ${streak2} win streak!`:""}`);
+    } else {
+      LS.set("ft-duel-streak",0);
+      if(tied)SuccessToastCtrl.show("It's a tie!");
+    }
     // Snapshot final score so history shows accurate score even after more workouts are logged
     const finalMyScore=getDuelScore(duel);
     saveActive(active.map(dd=>dd.id===duel.id?{...dd,resultSeen:true,settled:true,finalMyScore}:dd));
+  };
+
+  const forfeitDuel=(duel)=>{
+    ConfirmCtrl.show("Forfeit this duel?","This counts as a loss.",()=>{
+      const cur=LS.get("ft-duel-record")||{wins:0,losses:0,ties:0};
+      cur.losses=(cur.losses||0)+1;
+      LS.set("ft-duel-record",cur);LS.set("ft-duel-streak",0);
+      setRecord({...cur});
+      saveActive(active.map(dd=>dd.id===duel.id?{...dd,resultSeen:true,settled:true,forfeited:true,finalMyScore:0}:dd));
+      SocialAPI.logEvent(email,"DuelForfeited",{friend:duel.friendEmail,metric:duel.metric},"private");
+      SuccessToastCtrl.show("Duel forfeited");
+    });
   };
 
   const removeDuel=(id)=>saveActive(active.filter(dd=>dd.id!==id));
@@ -942,10 +973,11 @@ export function SocialDuels({s,d}){
   const metricDef=(m)=>DUEL_METRICS.find(dm=>dm.id===m);
 
   const now=new Date();
-  const runningDuels=active.filter(dd=>new Date(dd.endDate)>=now);   // still in progress
-  const pendingResults=active.filter(dd=>new Date(dd.endDate)<now&&!dd.resultSeen); // ended, not claimed
-  const historyDuels=active.filter(dd=>new Date(dd.endDate)<now&&dd.resultSeen);   // settled
-  const activeDuels=runningDuels; // alias used by tab label
+  const pendingInvites=active.filter(dd=>dd.status==="pending"); // sent, waiting for acceptance
+  const runningDuels=active.filter(dd=>dd.status==="active"&&new Date(dd.endDate)>=now);   // in progress
+  const pendingResults=active.filter(dd=>dd.status==="active"&&new Date(dd.endDate)<now&&!dd.resultSeen); // ended, not claimed
+  const historyDuels=active.filter(dd=>(new Date(dd.endDate)<now&&dd.resultSeen)||dd.forfeited);   // settled
+  const activeDuels=[...pendingInvites,...runningDuels]; // alias used by tab label
   const totalDuels=Math.max(1,(record.wins||0)+(record.losses||0)+(record.ties||0)); // guard /0
 
   return(
@@ -1067,8 +1099,9 @@ export function SocialDuels({s,d}){
       {/* ── Tab selector ── */}
       {(activeDuels.length>0||historyDuels.length>0)&&(
         <div style={{display:"flex",gap:0,borderRadius:10,overflow:"hidden",border:`1px solid ${V.cardBorder}`}}>
-          {[{id:"active",label:"Active"+(runningDuels.length>0?" ("+runningDuels.length+")":"")},
-            {id:"history",label:"History"+(historyDuels.length>0?" ("+historyDuels.length+")":"")}].map(t=>(
+          {[{id:"active",label:"Active"+(activeDuels.length>0?" ("+activeDuels.length+")":"")},
+            {id:"history",label:"History"+(historyDuels.length>0?" ("+historyDuels.length+")":"")},
+            {id:"leaderboard",label:"🌍 Top"}].map(t=>(
             <button key={t.id} onClick={()=>setTab(t.id)} style={{flex:1,padding:"9px 0",
               background:tab===t.id?V.accent:"transparent",border:"none",cursor:"pointer",
               fontSize:12,fontWeight:700,color:tab===t.id?V.bg:V.text3,fontFamily:V.font,transition:"all .2s"}}>
@@ -1201,10 +1234,29 @@ export function SocialDuels({s,d}){
                     :`${theirV-myV} ${def?.unit||"pts"} behind — time to grind 💪`}
                 </div>
               )}
+              {/* Forfeit button */}
+              <button onClick={()=>forfeitDuel(duel)} style={{marginTop:8,width:"100%",padding:"6px",borderRadius:6,
+                background:`${V.danger}08`,border:`1px solid ${V.danger}20`,cursor:"pointer",
+                fontSize:10,color:V.danger,fontWeight:600,fontFamily:V.font}}>Forfeit</button>
             </div>
           </Card>
         );
       })}
+
+      {/* ── Pending invites (sent) ── */}
+      {tab==="active"&&pendingInvites.map(duel=>(
+        <Card key={duel.id} style={{padding:14,opacity:0.7}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div>
+              <div style={{fontSize:12,fontWeight:600,color:V.text}}>⏳ Waiting for {duel.friendName}</div>
+              <div style={{fontSize:10,color:V.text3}}>{DUEL_METRICS.find(m=>m.id===duel.metric)?.label||duel.metric} · {duel.days}d</div>
+            </div>
+            <button onClick={()=>removeDuel(duel.id)} style={{padding:"4px 10px",borderRadius:6,
+              background:"rgba(255,255,255,0.04)",border:`1px solid ${V.cardBorder}`,cursor:"pointer",
+              fontSize:10,color:V.text3,fontFamily:V.font}}>Cancel</button>
+          </div>
+        </Card>
+      ))}
 
       {/* ── History cards ── */}
       {tab==="history"&&(
@@ -1253,6 +1305,11 @@ export function SocialDuels({s,d}){
               </Card>
             );
           })
+      )}
+
+      {/* ── Duel Leaderboard ── */}
+      {tab==="leaderboard"&&(
+        <DuelLeaderboard email={email}/>
       )}
 
       {/* ── New duel Sheet (using proper Sheet component to fix iOS tap issue) ── */}
@@ -1433,6 +1490,10 @@ export function SocialWeeklyWar({s,d}){
   // Weekly war streak from LS
   const [warWins,setWarWins]=useState(LS.get("ft-war-wins")||0);
   const [warStreak,setWarStreak]=useState(LS.get("ft-war-streak")||0);
+  const [warTab,setWarTab]=useState("current"); // current | history | leaderboard | groups
+  const [warLbData,setWarLbData]=useState(null);
+  const [groupWarData,setGroupWarData]=useState(null);
+  const email=s.profile?.email;
   // B21 fix: track claimed wins per weekIdx so wins can actually be recorded
   const claimedKey=`ft-war-claimed-${weekIdx}`;
   const [winClaimed,setWinClaimed]=useState(!!LS.get(claimedKey));
@@ -1445,11 +1506,27 @@ export function SocialWeeklyWar({s,d}){
     const newStreak=lastWin&&prevWeekIdx===weekIdx-1?(LS.get("ft-war-streak")||0)+1:1;
     LS.set("ft-war-wins",newWins);LS.set("ft-war-streak",newStreak);
     LS.set("ft-last-war-win",weekStart);LS.set(claimedKey,true);
+    // Save to war history
+    const hist=LS.get("ft-war-history")||[];
+    hist.push({weekIdx,warId:mainWar.id,warName:mainWar.name,myVal:mainWar.myVal,target:mainWar.target,date:today()});
+    LS.set("ft-war-history",hist.slice(-52));
     setWarWins(newWins);setWarStreak(newStreak);setWinClaimed(true);
     addXPBonus(100,"Weekly War Victory 🏆");
     SuccessToastCtrl.show(`🏆 War Won! +100 XP · ${newStreak} war win streak!`);
     Haptic.success();
   };
+
+  // Load war leaderboard when tab changes
+  useEffect(()=>{if(warTab==="leaderboard"&&email){SocialAPI.globalLeaderboard(email,"war_wins").then(setWarLbData);}},[warTab,email]);
+  // Load group wars when tab changes
+  useEffect(()=>{if(warTab==="groups"&&email){
+    SocialAPI.getGroups(email).then(r=>{
+      if(!r?.groups?.length){setGroupWarData([]);return;}
+      const warMetricMap={workouts:"weekWorkouts",volume:"weekVol",protein:"macro",streak:"streak",mixed:"weekWorkouts"};
+      Promise.all(r.groups.map(g=>SocialAPI.getGroupWar(email,g.code,warMetricMap[mainWar.id]||"weekWorkouts").then(d=>({...d,groupName:g.name,groupCode:g.code}))))
+        .then(setGroupWarData);
+    });
+  }},[warTab,email]);
 
   const formatVal=(v)=>v>=10000?`${(v/1000).toFixed(1)}k`:v;
 
@@ -1541,9 +1618,17 @@ export function SocialWeeklyWar({s,d}){
         </Card>
       ))}
 
-      {/* War record */}
+      {/* War record + streak badges */}
       <Card style={{padding:14}}>
-        <div style={{fontSize:11,fontWeight:700,color:V.text3,marginBottom:10}}>YOUR WAR RECORD</div>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+          <div style={{fontSize:11,fontWeight:700,color:V.text3}}>YOUR WAR RECORD</div>
+          {warStreak>=3&&<div style={{fontSize:9,padding:"2px 8px",borderRadius:6,
+            background:warStreak>=10?"#fbbf2420":warStreak>=5?`${V.accent}15`:"#f59e0b15",
+            border:`1px solid ${warStreak>=10?"#fbbf24":warStreak>=5?V.accent:"#f59e0b"}30`,
+            color:warStreak>=10?"#fbbf24":warStreak>=5?V.accent:"#f59e0b",fontWeight:700}}>
+            {warStreak>=10?"👑 War Legend":warStreak>=5?"⚡ Unstoppable":"🔥 War Machine"} · {warStreak} streak
+          </div>}
+        </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
           {[
             {l:"Total Wins",v:warWins,c:"#22c55e",i:"🏆"},
@@ -1559,6 +1644,106 @@ export function SocialWeeklyWar({s,d}){
           ))}
         </div>
       </Card>
+
+      {/* ── War tabs ── */}
+      <div style={{display:"flex",gap:0,borderRadius:10,overflow:"hidden",border:`1px solid ${V.cardBorder}`}}>
+        {[{id:"current",l:"This Week"},{id:"history",l:"History"},{id:"leaderboard",l:"🌍 Rankings"},{id:"groups",l:"Group Wars"}].map(t=>(
+          <button key={t.id} onClick={()=>setWarTab(t.id)} style={{flex:1,padding:"8px 0",
+            background:warTab===t.id?V.accent:"transparent",border:"none",cursor:"pointer",
+            fontSize:10,fontWeight:700,color:warTab===t.id?V.bg:V.text3,fontFamily:V.font}}>{t.l}</button>
+        ))}
+      </div>
+
+      {/* ── War History ── */}
+      {warTab==="history"&&(()=>{
+        const hist=LS.get("ft-war-history")||[];
+        if(hist.length===0)return <Card style={{padding:20,textAlign:"center"}}><div style={{fontSize:11,color:V.text3}}>No war history yet. Claim victories to build your record!</div></Card>;
+        // Personal bests per war type
+        const pbs={};hist.forEach(h=>{if(!pbs[h.warId]||h.myVal>pbs[h.warId])pbs[h.warId]=h.myVal;});
+        return(<div style={{display:"flex",flexDirection:"column",gap:6}}>
+          <Card style={{padding:12}}>
+            <div style={{fontSize:11,fontWeight:700,color:V.text3,marginBottom:8}}>PERSONAL BESTS</div>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+              {Object.entries(pbs).map(([id,val])=>(
+                <div key={id} style={{padding:"6px 10px",borderRadius:8,background:`${V.accent}08`,border:`1px solid ${V.accent}20`}}>
+                  <div style={{fontSize:10,color:V.text3}}>{id}</div>
+                  <div style={{fontSize:14,fontWeight:800,color:V.accent,fontFamily:V.mono}}>{formatVal(val)}</div>
+                </div>
+              ))}
+            </div>
+          </Card>
+          {hist.slice().reverse().map((h,i)=>(
+            <Card key={i} style={{padding:10}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div>
+                  <div style={{fontSize:12,fontWeight:600,color:V.text}}>🏆 {h.warName||h.warId}</div>
+                  <div style={{fontSize:10,color:V.text3}}>{h.date}</div>
+                </div>
+                <div style={{textAlign:"right"}}>
+                  <div style={{fontSize:14,fontWeight:800,color:V.accent,fontFamily:V.mono}}>{formatVal(h.myVal)}</div>
+                  <div style={{fontSize:9,color:V.text3}}>/ {formatVal(h.target)}</div>
+                  {pbs[h.warId]===h.myVal&&<span style={{fontSize:8,color:"#fbbf24",fontWeight:700}}>PB!</span>}
+                </div>
+              </div>
+            </Card>
+          ))}
+        </div>);
+      })()}
+
+      {/* ── War Leaderboard ── */}
+      {warTab==="leaderboard"&&(
+        warLbData?.leaderboard?.length>0?(
+          <div style={{display:"flex",flexDirection:"column",gap:6}}>
+            {warLbData.myRank&&<Card style={{padding:10,background:`${V.accent}06`,border:`1px solid ${V.accent}30`}}>
+              <div style={{fontSize:10,color:V.text3}}>YOUR GLOBAL WAR RANK</div>
+              <div style={{fontSize:20,fontWeight:900,color:V.accent,fontFamily:V.mono}}>#{warLbData.myRank}</div>
+            </Card>}
+            {warLbData.leaderboard.map((e,i)=>(
+              <Card key={i} style={{padding:10,border:e.isMe?`1.5px solid ${V.accent}40`:undefined}}>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <div style={{width:24,height:24,borderRadius:8,background:i===0?"#fbbf24":i===1?"#94a3b8":i===2?"#cd7f32":"rgba(255,255,255,0.1)",
+                    display:"flex",alignItems:"center",justifyContent:"center",fontSize:i<3?12:10,fontWeight:800,color:i<3?"#000":V.text3,flexShrink:0}}>
+                    {i<3?["🥇","🥈","🥉"][i]:i+1}
+                  </div>
+                  <div style={{flex:1}}><span style={{fontSize:12,fontWeight:e.isMe?700:500,color:e.isMe?V.accent:V.text}}>{e.firstName||e.username||"User"}{e.isMe?" (You)":""}</span></div>
+                  <span style={{fontSize:13,fontWeight:800,color:V.text,fontFamily:V.mono}}>{e.value} <span style={{fontSize:9,color:V.text3}}>wins</span></span>
+                </div>
+              </Card>
+            ))}
+          </div>
+        ):<Card style={{padding:20,textAlign:"center"}}><div style={{fontSize:11,color:V.text3}}>Loading rankings...</div></Card>
+      )}
+
+      {/* ── Group Wars ── */}
+      {warTab==="groups"&&(
+        groupWarData?(
+          groupWarData.length>0?(
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+              {groupWarData.map((gw,i)=>(
+                <Card key={gw.groupCode||i} style={{padding:14}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                    <div>
+                      <div style={{fontSize:13,fontWeight:700,color:V.text}}>{gw.groupName}</div>
+                      <div style={{fontSize:10,color:V.text3}}>{gw.syncedCount||0}/{gw.memberCount||0} members synced</div>
+                    </div>
+                    <div style={{textAlign:"right"}}>
+                      <div style={{fontSize:18,fontWeight:900,color:V.accent,fontFamily:V.mono}}>{formatVal(gw.groupTotal||0)}</div>
+                      <div style={{fontSize:9,color:V.text3}}>team total</div>
+                    </div>
+                  </div>
+                  {(gw.members||[]).map((m,j)=>(
+                    <div key={j} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 0",
+                      borderTop:j===0?`1px solid rgba(255,255,255,0.05)`:"none"}}>
+                      <span style={{fontSize:11,color:m.isMe?V.accent:V.text,fontWeight:m.isMe?600:400}}>{m.name}{m.isMe?" (You)":""}</span>
+                      <span style={{fontSize:11,fontWeight:700,color:V.text,fontFamily:V.mono}}>{formatVal(m.value||0)}</span>
+                    </div>
+                  ))}
+                </Card>
+              ))}
+            </div>
+          ):<Card style={{padding:20,textAlign:"center"}}><div style={{fontSize:11,color:V.text3}}>Join a group to compete in team wars!</div></Card>
+        ):<Card style={{padding:20,textAlign:"center"}}><div style={{fontSize:11,color:V.text3}}>Loading group wars...</div></Card>
+      )}
     </div>
   );
 }
@@ -1688,6 +1873,33 @@ export function SocialRivals({s,d}){
       )}
     </div>
   );
+}
+
+// ─── Duel Leaderboard (global top duelists) ───
+function DuelLeaderboard({email}){
+  const [data,setData]=useState(null);
+  const [loading,setLoading]=useState(true);
+  useEffect(()=>{SocialAPI.globalLeaderboard(email,"duels").then(r=>{setData(r);setLoading(false);});},[email]);
+  if(loading)return <SkeletonCard lines={4}/>;
+  if(!data?.leaderboard?.length)return(<Card style={{padding:20,textAlign:"center"}}><div style={{fontSize:11,color:V.text3}}>No duel data yet. Win duels to appear here!</div></Card>);
+  return(<div style={{display:"flex",flexDirection:"column",gap:6}}>
+    {data.myRank&&<Card style={{padding:10,background:`${V.accent}06`,border:`1px solid ${V.accent}30`}}>
+      <div style={{fontSize:10,color:V.text3,marginBottom:2}}>YOUR GLOBAL RANK</div>
+      <div style={{fontSize:20,fontWeight:900,color:V.accent,fontFamily:V.mono}}>#{data.myRank}</div>
+    </Card>}
+    {data.leaderboard.map((e,i)=>(
+      <Card key={i} style={{padding:10,border:e.isMe?`1.5px solid ${V.accent}40`:undefined}}>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <div style={{width:24,height:24,borderRadius:8,background:i===0?"#fbbf24":i===1?"#94a3b8":i===2?"#cd7f32":"rgba(255,255,255,0.1)",
+            display:"flex",alignItems:"center",justifyContent:"center",fontSize:i<3?12:10,fontWeight:800,color:i<3?"#000":V.text3,flexShrink:0}}>
+            {i<3?["🥇","🥈","🥉"][i]:i+1}
+          </div>
+          <div style={{flex:1}}><span style={{fontSize:12,fontWeight:e.isMe?700:500,color:e.isMe?V.accent:V.text}}>{e.firstName||e.username||"User"}{e.isMe?" (You)":""}</span></div>
+          <span style={{fontSize:13,fontWeight:800,color:V.text,fontFamily:V.mono}}>{e.value} <span style={{fontSize:9,color:V.text3}}>wins</span></span>
+        </div>
+      </Card>
+    ))}
+  </div>);
 }
 
 // ─── Log Hub ───

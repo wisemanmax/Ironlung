@@ -263,6 +263,32 @@ export const SocialAPI={
   globalLeaderboard:async(email,metric)=>{
     try{const r=await fetch(`${SYNC_URL}/api/social?route=global_leaderboard&metric=${encodeURIComponent(metric||"streak")}`,{headers:SocialAPI._headers(email)});if(!r.ok){console.warn('globalLeaderboard failed:',r.status);return null;}return await r.json();}catch(e){console.warn('globalLeaderboard error:',e.message);return null;}
   },
+
+  // Message management
+  deleteMessage:async(email,eventId)=>{
+    try{const r=await fetch(`${SYNC_URL}/api/social?route=feed`,{method:"POST",headers:SocialAPI._headers(email),body:JSON.stringify({route:"feed",email,action:"delete_message",event_id:eventId})});return r.ok?await r.json():null;}catch(e){return null;}
+  },
+
+  // Group management
+  setGroupRole:async(email,code,targetEmail,role)=>{
+    try{const r=await fetch(`${SYNC_URL}/api/social?route=groups`,{method:"POST",headers:SocialAPI._headers(email),body:JSON.stringify({route:"groups",email,action:"set_role",code,target_email:targetEmail,role})});return r.ok?await r.json():null;}catch(e){return null;}
+  },
+  kickMember:async(email,code,targetEmail)=>{
+    try{const r=await fetch(`${SYNC_URL}/api/social?route=groups`,{method:"POST",headers:SocialAPI._headers(email),body:JSON.stringify({route:"groups",email,action:"kick",code,target_email:targetEmail})});return r.ok?await r.json():null;}catch(e){return null;}
+  },
+  pinMessage:async(email,code,text)=>{
+    try{const r=await fetch(`${SYNC_URL}/api/social?route=groups`,{method:"POST",headers:SocialAPI._headers(email),body:JSON.stringify({route:"groups",email,action:"pin_message",code,text})});return r.ok?await r.json():null;}catch(e){return null;}
+  },
+
+  // Friend profile extras
+  getFriendWorkouts:async(email,friendEmail)=>{
+    try{const r=await fetch(`${SYNC_URL}/api/social?route=friend_workouts&friend=${encodeURIComponent(friendEmail)}`,{headers:SocialAPI._headers(email)});return r.ok?await r.json():null;}catch(e){return null;}
+  },
+
+  // Group wars
+  getGroupWar:async(email,groupCode,metric)=>{
+    try{const r=await fetch(`${SYNC_URL}/api/social?route=group_war&group=${encodeURIComponent(groupCode)}&metric=${encodeURIComponent(metric||"weekWorkouts")}`,{headers:SocialAPI._headers(email)});return r.ok?await r.json():null;}catch(e){return null;}
+  },
 };
 export const CloudSync={
   // Push all data to server (debounced, silent) — queues on failure
@@ -347,6 +373,8 @@ export const CloudSync={
         {id:"weekWorkouts",value:weekWorkouts},
         {id:"weekVol",value:weekVol},
         {id:"duel_wins",value:duelWins},
+        {id:"war_wins",value:LS.get("ft-war-wins")||0},
+        {id:"war_streak",value:LS.get("ft-war-streak")||0},
       ],badges2).catch(()=>{});
       // Flush queued items
       SyncQueue.processAll();

@@ -15,6 +15,19 @@ import { IronScoreCard, RankBadge, DailyMissionsCard } from './gamification';
 import { useStreak, calcReadiness } from '../components/dialogs';
 import { SectionGrid } from './hubs';
 
+// ─── Online Status Indicator ───
+function OnlineIndicator({lastActive,size=6,showText=false}){
+  if(!lastActive)return showText?<span style={{fontSize:9,color:V.text3}}>Offline</span>:null;
+  const diff=Date.now()-new Date(lastActive).getTime();
+  const online=diff<300000; // 5 min
+  const color=online?"#22c55e":"#6b7280";
+  const label=online?"Online":diff<3600000?`${Math.floor(diff/60000)}m ago`:diff<86400000?`${Math.floor(diff/3600000)}h ago`:"Offline";
+  return(<span style={{display:"inline-flex",alignItems:"center",gap:3}}>
+    <span style={{width:size,height:size,borderRadius:size,background:color,flexShrink:0}}/>
+    {showText&&<span style={{fontSize:9,color:online?"#22c55e":V.text3}}>{label}</span>}
+  </span>);
+}
+
 export function SocialTab({s,d,unreadMsgCount=0}){
   const { isDesktop } = useLayout();
   // Quick stats for display
@@ -323,6 +336,7 @@ export function SocialFriends({s,d}){
   const [dmLoadingOlder,setDmLoadingOlder]=useState(false);
   const dmEndRef=useRef(null);
   const [compareWith,setCompareWith]=useState(null);
+  const [friendWorkouts,setFriendWorkouts]=useState(null);
   // Global discover people
   const [showDiscover,setShowDiscover]=useState(false);
   const [discoverQ,setDiscoverQ]=useState("");
@@ -430,7 +444,7 @@ export function SocialFriends({s,d}){
     setTimeout(()=>dmEndRef.current?.scrollIntoView({behavior:"smooth"}),100);
   };
   const openFriendChat=(f)=>{setViewFriend(f);setFriendTab("chat");loadDMs(f.email);LS.set(`ft-unread-${f.email}`,0);LS.set(`ft-last-read-${f.email}`,new Date().toISOString());};
-  const openFriendProfile=(f)=>{setViewFriend(f);setFriendTab("profile");};
+  const openFriendProfile=(f)=>{setViewFriend(f);setFriendTab("profile");setFriendWorkouts(null);SocialAPI.getFriendWorkouts(email,f.email).then(r=>setFriendWorkouts(r));};
 
   // Auto-open DM chat if navigated here from a push notification
   useEffect(()=>{
@@ -578,6 +592,25 @@ export function SocialFriends({s,d}){
             )}
           </div>
         </Card>
+        {/* Recent workouts */}
+        {friendWorkouts&&!friendWorkouts.private&&(friendWorkouts.workouts||[]).length>0&&(
+          <Card style={{padding:14}}>
+            <div style={{fontSize:12,fontWeight:700,color:V.text,marginBottom:8}}>🏋️ Recent Activity</div>
+            {friendWorkouts.workouts.map((w,i)=>(
+              <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",
+                borderBottom:i<friendWorkouts.workouts.length-1?`1px solid rgba(255,255,255,0.04)`:"none"}}>
+                <div>
+                  <div style={{fontSize:12,color:V.text}}>{fmtShort(w.date)}</div>
+                  <div style={{fontSize:10,color:V.text3}}>{w.exerciseCount} exercise{w.exerciseCount!==1?"s":""}</div>
+                </div>
+                {w.duration&&<div style={{fontSize:11,color:V.text3,fontFamily:V.mono}}>{w.duration}min</div>}
+              </div>
+            ))}
+          </Card>
+        )}
+        {friendWorkouts?.private&&(
+          <Card style={{padding:14,textAlign:"center"}}><div style={{fontSize:11,color:V.text3}}>🔒 Workouts are private</div></Card>
+        )}
         {/* #2: Streak comparison */}
         {viewFriend.challenges?.find(c=>c.challenge_id==="streak")&&(
           <Card style={{padding:14}}>
@@ -885,7 +918,7 @@ export function SocialFriends({s,d}){
                   </div>}
                 </div>
                 <div style={{flex:1}}>
-                  <div style={{fontSize:13,fontWeight:600,color:V.text}}>{f.name||"Unknown"}</div>
+                  <div style={{display:"flex",alignItems:"center",gap:5}}><span style={{fontSize:13,fontWeight:600,color:V.text}}>{f.name||"Unknown"}</span><OnlineIndicator lastActive={f.lastActive}/></div>
                   {f.username&&<div style={{fontSize:10,color:V.text3}}>@{f.username}</div>}
                 </div>
                 <div style={{display:"flex",gap:4}}>
@@ -1117,6 +1150,8 @@ export function IMConversation({s,email,displayName,friend,onBack}){
   const [loadingOlder,setLoadingOlder]=useState(false);
   const [reacting,setReacting]=useState(null); // message id being reacted to
   const [reactions,setReactions]=useState(()=>LS.get(`ft-reactions-${friend.email}`)||{});
+  const [searchOpen,setSearchOpen]=useState(false);
+  const [searchQ,setSearchQ]=useState("");
   const [friendInfo,setFriendInfo]=useState(false); // friend info sheet open
   const [typing,setTyping]=useState(false);           // friend typing indicator
   const typingTimeoutRef=useRef(null);
@@ -1360,17 +1395,24 @@ export function IMConversation({s,email,displayName,friend,onBack}){
           </div>
           <div>
             <div style={{fontSize:15,fontWeight:700,color:V.text,lineHeight:1.2}}>{friendDisplayName(friend)}</div>
-            {friend.username&&<div style={{fontSize:11,color:V.text3,marginTop:1}}>@{friend.username}</div>}
+            <OnlineIndicator lastActive={friend.lastActive} showText/>
           </div>
         </button>
         {/* Video call placeholder — visual parity with iMessage */}
         <button style={{background:"none",border:"none",cursor:"default",padding:"4px 6px",opacity:0.35}}>
           <svg width="22" height="16" viewBox="0 0 24 18" fill="none" stroke={V.accent} strokeWidth="2" strokeLinecap="round"><rect x="1" y="2" width="15" height="14" rx="2"/><path d="M16 7l6-4v12l-6-4"/></svg>
         </button>
-        <button style={{background:"none",border:"none",cursor:"default",padding:"4px 6px",opacity:0.35}}>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={V.accent} strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
+        <button onClick={()=>{setSearchOpen(!searchOpen);setSearchQ("");}} style={{background:"none",border:"none",cursor:"pointer",padding:"4px 6px",opacity:searchOpen?1:0.6}}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={searchOpen?V.accent:V.text3} strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg>
         </button>
       </div>
+      {/* ── Message search bar ── */}
+      {searchOpen&&<div style={{padding:"6px 0",borderBottom:`1px solid ${V.cardBorder}`}}>
+        <input value={searchQ} onChange={e=>setSearchQ(e.target.value)} autoFocus placeholder="Search messages..."
+          style={{width:"100%",padding:"8px 12px",background:"rgba(255,255,255,0.04)",border:`1px solid ${V.cardBorder}`,
+            borderRadius:8,color:V.text,fontSize:12,outline:"none",fontFamily:V.font,boxSizing:"border-box"}}/>
+        {searchQ&&<div style={{fontSize:10,color:V.text3,marginTop:4}}>{messages.filter(m=>(m.text||"").toLowerCase().includes(searchQ.toLowerCase())).length} matches</div>}
+      </div>}
 
       {/* ── Message list ── */}
       <div ref={listRef} style={{flex:1,overflowY:"auto",WebkitOverflowScrolling:"touch",display:"flex",flexDirection:"column",
@@ -1466,7 +1508,9 @@ export function IMConversation({s,email,displayName,friend,onBack}){
                             border:isOwn?"none":`1px solid rgba(255,255,255,0.06)`,
                             cursor:"default",
                           }}>
-                            <div style={{fontSize:15,color:isOwn?V.bg:V.text,lineHeight:1.4,wordBreak:"break-word"}}>{m.text}</div>
+                            <div style={{fontSize:15,color:isOwn?V.bg:V.text,lineHeight:1.4,wordBreak:"break-word",
+                              background:searchQ&&(m.text||"").toLowerCase().includes(searchQ.toLowerCase())?`${V.accent}30`:undefined,
+                              borderRadius:searchQ?4:0}}>{m.text}</div>
                           </div>
                         )}
                         {/* Reaction pill */}
@@ -1487,6 +1531,12 @@ export function IMConversation({s,email,displayName,friend,onBack}){
                                 fontSize:20,cursor:"pointer",padding:"2px",borderRadius:8,
                                 WebkitTapHighlightColor:"transparent"}}>{e}</button>
                             ))}
+                            {isOwn&&<button onClick={()=>{setReacting(null);ConfirmCtrl.show("Delete message?","This cannot be undone.",async()=>{
+                              await SocialAPI.deleteMessage(email,m.id);
+                              setMessages(prev=>prev.filter(x=>x.id!==m.id));
+                              LS.set(`ft-dm-${friend.email}`,(LS.get(`ft-dm-${friend.email}`)||[]).filter(x=>x.id!==m.id));
+                            });}} style={{background:"none",border:"none",fontSize:16,cursor:"pointer",padding:"2px",borderRadius:8,
+                              WebkitTapHighlightColor:"transparent",opacity:0.7}}>🗑️</button>}
                           </div>
                         )}
                       </div>
@@ -1800,9 +1850,21 @@ export function SocialGroups({s,d}){
         <button onClick={()=>{navigator.clipboard?.writeText(selGroup);SuccessToastCtrl.show("Code copied");}} style={{padding:"4px 10px",borderRadius:6,background:`${V.accent}08`,border:`1px solid ${V.accent}30`,cursor:"pointer",fontSize:10,color:V.accent,fontWeight:600,fontFamily:V.font}}>Copy Code</button>
       </div>
 
+      {/* Pinned announcement */}
+      {(()=>{const g=groups?.groups?.find(gg=>gg.code===selGroup);const pin=g?.pinned_message;if(!pin)return null;
+        const myRole=members?.members?.find(m=>m.email===email)?.role;const canEdit=myRole==="owner"||myRole==="admin";
+        return(<Card style={{padding:10,background:`${V.accent}06`,border:`1px solid ${V.accent}20`}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+            <div style={{flex:1}}><div style={{fontSize:9,fontWeight:700,color:V.accent,marginBottom:3}}>📌 ANNOUNCEMENT</div>
+              <div style={{fontSize:12,color:V.text,lineHeight:1.4}}>{pin.text}</div></div>
+            {canEdit&&<button onClick={()=>ConfirmCtrl.show("Remove announcement?","",async()=>{await SocialAPI.pinMessage(email,selGroup,null);loadGroups();})}
+              style={{background:"none",border:"none",cursor:"pointer",fontSize:10,color:V.text3,padding:4}}>✕</button>}
+          </div>
+        </Card>);})()}
+
       {/* Tab bar */}
       <div style={{display:"flex",gap:0,background:V.card,borderRadius:10,padding:3,border:`1px solid ${V.cardBorder}`}}>
-        {[{id:"board",l:"Board"},{id:"challenges",l:"Challenges"},{id:"feed",l:"Feed"},{id:"chat",l:"Chat"}].map(t=>(
+        {[{id:"board",l:"Board"},{id:"challenges",l:"Challenges"},{id:"feed",l:"Feed"},{id:"chat",l:"Chat"},{id:"members",l:"Members"}].map(t=>(
           <button key={t.id} onClick={()=>setGroupTab(t.id)} style={{flex:1,padding:"8px 4px",borderRadius:8,
             background:groupTab===t.id?V.accent:"transparent",border:"none",cursor:"pointer",
             fontSize:10,fontWeight:groupTab===t.id?700:500,color:groupTab===t.id?V.bg:V.text3,fontFamily:V.font}}>{t.l}</button>
@@ -2028,6 +2090,61 @@ export function SocialGroups({s,d}){
           </button>
         </div>
       </>)}
+
+      {/* ── Members tab (with roles) ── */}
+      {groupTab==="members"&&(
+        <div style={{display:"flex",flexDirection:"column",gap:4}}>
+          {(()=>{const myRole=members?.members?.find(m=>m.email===email)?.role;const isOwner=myRole==="owner";const isAdmin=myRole==="admin"||isOwner;
+          return(<>
+            {/* Pin announcement button */}
+            {isAdmin&&(<Btn v="secondary" full onClick={()=>{
+              const text=prompt("Enter announcement text (max 500 chars):");
+              if(text?.trim()){SocialAPI.pinMessage(email,selGroup,text.trim());loadGroups();SuccessToastCtrl.show("Announcement pinned");}
+            }}>📌 Pin Announcement</Btn>)}
+            {(members?.members||[]).map((m,i)=>{
+              const isMe=m.email===email;const roleIcon=m.role==="owner"?"👑":m.role==="admin"?"⭐":"";
+              return(
+                <Card key={m.email||i} style={{padding:10}}>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8}}>
+                      <div style={{width:28,height:28,borderRadius:8,background:`linear-gradient(135deg,${V.purple},#ec4899)`,
+                        display:"flex",alignItems:"center",justifyContent:"center"}}>
+                        <span style={{fontSize:11,color:"#fff",fontWeight:800}}>{(m.name||"?")[0].toUpperCase()}</span>
+                      </div>
+                      <div>
+                        <div style={{fontSize:12,fontWeight:600,color:isMe?V.accent:V.text}}>{m.name||"Unknown"}{isMe?" (You)":""} {roleIcon}</div>
+                        {m.username&&<div style={{fontSize:10,color:V.text3}}>@{m.username}</div>}
+                      </div>
+                    </div>
+                    {isOwner&&!isMe&&(
+                      <div style={{display:"flex",gap:4}}>
+                        <button onClick={async()=>{
+                          const newRole=m.role==="admin"?"member":"admin";
+                          const r=await SocialAPI.setGroupRole(email,selGroup,m.email,newRole);
+                          if(r?.success){SuccessToastCtrl.show(newRole==="admin"?"Promoted to admin":"Demoted to member");SocialAPI.getMembers(email,selGroup).then(setMembers);}
+                        }} style={{padding:"3px 8px",borderRadius:5,background:`${V.accent}10`,border:`1px solid ${V.accent}25`,
+                          cursor:"pointer",fontSize:9,color:V.accent,fontFamily:V.font}}>
+                          {m.role==="admin"?"Demote":"Promote"}
+                        </button>
+                        <button onClick={()=>ConfirmCtrl.show(`Kick ${m.name}?`,"They can rejoin with the code.",async()=>{
+                          await SocialAPI.kickMember(email,selGroup,m.email);SocialAPI.getMembers(email,selGroup).then(setMembers);SuccessToastCtrl.show("Member removed");
+                        })} style={{padding:"3px 8px",borderRadius:5,background:`${V.danger}10`,border:`1px solid ${V.danger}25`,
+                          cursor:"pointer",fontSize:9,color:V.danger,fontFamily:V.font}}>Kick</button>
+                      </div>
+                    )}
+                    {isAdmin&&!isOwner&&!isMe&&m.role!=="owner"&&(
+                      <button onClick={()=>ConfirmCtrl.show(`Kick ${m.name}?`,"They can rejoin with the code.",async()=>{
+                        await SocialAPI.kickMember(email,selGroup,m.email);SocialAPI.getMembers(email,selGroup).then(setMembers);SuccessToastCtrl.show("Member removed");
+                      })} style={{padding:"3px 8px",borderRadius:5,background:`${V.danger}10`,border:`1px solid ${V.danger}25`,
+                        cursor:"pointer",fontSize:9,color:V.danger,fontFamily:V.font}}>Kick</button>
+                    )}
+                  </div>
+                </Card>
+              );
+            })}
+          </>);})()}
+        </div>
+      )}
     </div>
   );
 
@@ -2561,8 +2678,28 @@ export function SocialNotifications({s,d}){
     if(n.type==="dm")return"💬";
     if(n.type==="group_chat")return"👥";
     if(n.type==="friend_request")return"🤝";
+    if(n.type==="duel_invite")return"⚔️";
     if(n.type==="reaction")return"🔥";
     return"🔔";
+  };
+
+  const acceptDuelInvite=(notif)=>{
+    const meta=notif.metadata||{};
+    const duels=LS.get("ft-duels")||[];
+    duels.push({id:meta.duelId||uid(),friendEmail:meta.from,friendName:meta.name||"Challenger",
+      metric:meta.metric||"streak",days:meta.days||7,startDate:today(),endDate:ago(-(meta.days||7)),
+      status:"active",resultSeen:false,myStartVal:0,theirVal:0});
+    LS.set("ft-duels",duels);
+    SocialAPI.logEvent(email,"DuelAccepted",{to:meta.from,metric:meta.metric},"private");
+    markOneRead(notif);
+    SuccessToastCtrl.show("⚔️ Duel accepted! Let's go!");
+  };
+
+  const declineDuelInvite=(notif)=>{
+    const meta=notif.metadata||{};
+    SocialAPI.logEvent(email,"DuelDeclined",{to:meta.from,metric:meta.metric},"private");
+    deleteOne(notif.id);
+    SuccessToastCtrl.show("Duel declined");
   };
 
   return(
@@ -2613,6 +2750,15 @@ export function SocialNotifications({s,d}){
               </div>
               <div style={{fontSize:11,color:n.read?V.text3:V.text2,marginTop:2,
                 overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{cleanBody(n.body)}</div>
+              {n.type==="duel_invite"&&!n.read&&(
+                <div style={{display:"flex",gap:6,marginTop:6}} onClick={e=>e.stopPropagation()}>
+                  <button onClick={()=>acceptDuelInvite(n)} style={{padding:"5px 14px",borderRadius:6,background:V.accent,
+                    border:"none",cursor:"pointer",fontSize:10,fontWeight:700,color:V.bg,fontFamily:V.font}}>Accept</button>
+                  <button onClick={()=>declineDuelInvite(n)} style={{padding:"5px 14px",borderRadius:6,
+                    background:"rgba(255,255,255,0.04)",border:`1px solid ${V.cardBorder}`,
+                    cursor:"pointer",fontSize:10,color:V.text3,fontFamily:V.font}}>Decline</button>
+                </div>
+              )}
             </div>
             <button onClick={e=>{e.stopPropagation();deleteOne(n.id);}} style={{
               background:"none",border:"none",cursor:"pointer",padding:4,flexShrink:0,opacity:0.4}}>
