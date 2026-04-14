@@ -252,6 +252,17 @@ export const SocialAPI={
   getProfile:async(username)=>{
     try{const r=await fetch(`${SYNC_URL}/api/social?route=profile&username=${encodeURIComponent(username)}`);return r.ok?await r.json():null;}catch(e){return null;}
   },
+
+  // Global discovery
+  discoverUsers:async(email,q,page)=>{
+    try{const params=new URLSearchParams({route:"discover_users"});if(q)params.set("q",q);if(page)params.set("page",String(page));const r=await fetch(`${SYNC_URL}/api/social?${params}`,{headers:SocialAPI._headers(email)});return r.ok?await r.json():null;}catch(e){return null;}
+  },
+  discoverGroups:async(email,q,page)=>{
+    try{const params=new URLSearchParams({route:"discover_groups"});if(q)params.set("q",q);if(page)params.set("page",String(page));const r=await fetch(`${SYNC_URL}/api/social?${params}`,{headers:SocialAPI._headers(email)});return r.ok?await r.json():null;}catch(e){return null;}
+  },
+  globalLeaderboard:async(email,metric)=>{
+    try{const r=await fetch(`${SYNC_URL}/api/social?route=global_leaderboard&metric=${encodeURIComponent(metric||"streak")}`,{headers:SocialAPI._headers(email)});return r.ok?await r.json():null;}catch(e){return null;}
+  },
 };
 export const CloudSync={
   // Push all data to server (debounced, silent) — queues on failure

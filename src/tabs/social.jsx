@@ -323,6 +323,17 @@ export function SocialFriends({s,d}){
   const [dmLoadingOlder,setDmLoadingOlder]=useState(false);
   const dmEndRef=useRef(null);
   const [compareWith,setCompareWith]=useState(null);
+  // Global discover people
+  const [showDiscover,setShowDiscover]=useState(false);
+  const [discoverQ,setDiscoverQ]=useState("");
+  const [discoverResults,setDiscoverResults]=useState(null);
+  const [discoverLoading,setDiscoverLoading]=useState(false);
+  const [discoverPage,setDiscoverPage]=useState(1);
+  const discoverSearch=(q,page)=>{
+    setDiscoverLoading(true);
+    SocialAPI.discoverUsers(email,q||"",page||1).then(r=>{setDiscoverResults(r);setDiscoverLoading(false);});
+  };
+  useEffect(()=>{if(showDiscover)discoverSearch(discoverQ,1);},[showDiscover]);
   const streak=useStreak(s.workouts);
   const getBest=(id)=>{let b=0;s.workouts.forEach(w=>w.exercises.forEach(e=>{if(e.exerciseId===id)e.sets.forEach(st=>{if(st.weight>b)b=st.weight;});}));return b;};
   const myBig3=getBest("bench")+getBest("squat")+getBest("deadlift");
@@ -795,6 +806,54 @@ export function SocialFriends({s,d}){
           <Btn onClick={sendAdd} disabled={!addInput.trim()}>Add</Btn>
         </div>
       </Card>
+
+      {/* ── Discover People (global) ── */}
+      <Card style={{padding:14}}>
+        <button onClick={()=>setShowDiscover(!showDiscover)} style={{width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",background:"none",border:"none",cursor:"pointer",padding:0}}>
+          <span style={{fontSize:12,fontWeight:700,color:V.accent}}>🌍 Discover People</span>
+          <span style={{fontSize:10,color:V.text3}}>{showDiscover?"▲":"▼"}</span>
+        </button>
+        {showDiscover&&<div style={{marginTop:10}}>
+          <div style={{display:"flex",gap:8,marginBottom:10}}>
+            <input value={discoverQ} onChange={e=>setDiscoverQ(e.target.value)}
+              onKeyDown={e=>{if(e.key==="Enter"){setDiscoverPage(1);discoverSearch(discoverQ,1);}}}
+              placeholder="Search by name or username..."
+              style={{flex:1,padding:"8px 12px",background:"rgba(255,255,255,0.04)",border:`1px solid ${V.cardBorder}`,borderRadius:8,color:V.text,fontSize:12,outline:"none",fontFamily:V.font}}/>
+            <Btn v="secondary" onClick={()=>{setDiscoverPage(1);discoverSearch(discoverQ,1);}}>Search</Btn>
+          </div>
+          {discoverLoading&&<div style={{textAlign:"center",padding:12,fontSize:11,color:V.text3}}>Loading...</div>}
+          {!discoverLoading&&discoverResults&&(discoverResults.users||[]).length===0&&<div style={{textAlign:"center",padding:12,fontSize:11,color:V.text3}}>No users found</div>}
+          {!discoverLoading&&(discoverResults?.users||[]).map((u,i)=>(
+            <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 0",borderBottom:i<discoverResults.users.length-1?`1px solid rgba(255,255,255,0.03)`:"none"}}>
+              <div style={{width:32,height:32,borderRadius:8,background:`linear-gradient(135deg,${V.purple},#ec4899)`,
+                display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,overflow:"hidden"}}>
+                {u.avatar?<img src={u.avatar} style={{width:"100%",height:"100%",objectFit:"cover"}} alt=""/>
+                :<span style={{fontSize:13,color:V.bg,fontWeight:900}}>{(u.firstName||u.nickname||"?")[0].toUpperCase()}</span>}
+              </div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:12,fontWeight:600,color:V.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{u.firstName||"User"}{u.nickname?` (${u.nickname})`:""}</div>
+                {u.username&&<div style={{fontSize:10,color:V.text3}}>@{u.username}</div>}
+              </div>
+              {u.friendStatus==="accepted"?<span style={{fontSize:9,color:V.success,fontWeight:600}}>Friends</span>
+              :u.friendStatus==="pending"?<span style={{fontSize:9,color:V.warning,fontWeight:600}}>Pending</span>
+              :<button onClick={async()=>{
+                const target=u.friendCode||u.username||"";
+                if(!target)return;
+                const r=await SocialAPI.sendRequest(email,target);
+                if(r?.success){SuccessToastCtrl.show("Request sent!");discoverSearch(discoverQ,discoverPage);}
+                else SuccessToastCtrl.show(r?.error||"Could not add");
+              }} style={{padding:"4px 10px",borderRadius:6,background:V.accent,border:"none",cursor:"pointer",fontSize:10,fontWeight:700,color:V.bg,fontFamily:V.font}}>Add</button>}
+            </div>
+          ))}
+          {!discoverLoading&&discoverResults&&discoverResults.total>discoverResults.users?.length&&(
+            <div style={{display:"flex",justifyContent:"center",gap:8,marginTop:8}}>
+              {discoverPage>1&&<Btn v="secondary" onClick={()=>{const p=discoverPage-1;setDiscoverPage(p);discoverSearch(discoverQ,p);}}>← Prev</Btn>}
+              <Btn v="secondary" onClick={()=>{const p=discoverPage+1;setDiscoverPage(p);discoverSearch(discoverQ,p);}}>Next →</Btn>
+            </div>
+          )}
+        </div>}
+      </Card>
+
       {friendsData?.incoming?.length>0&&(
         <Card style={{padding:14,border:`1px solid ${V.accent}20`}}>
           <div style={{fontSize:12,fontWeight:700,color:V.accent,marginBottom:8}}>Requests ({friendsData.incoming.length})</div>
@@ -1651,6 +1710,17 @@ export function SocialGroups({s,d}){
   const [groupChals,setGroupChals]=useState([]);
   const [groupFeed,setGroupFeed]=useState([]);
   const streak=useStreak(s.workouts);
+  // Global discover groups
+  const [showDiscoverG,setShowDiscoverG]=useState(false);
+  const [discoverGQ,setDiscoverGQ]=useState("");
+  const [discoverGResults,setDiscoverGResults]=useState(null);
+  const [discoverGLoading,setDiscoverGLoading]=useState(false);
+  const [discoverGPage,setDiscoverGPage]=useState(1);
+  const discoverGSearch=(q,page)=>{
+    setDiscoverGLoading(true);
+    SocialAPI.discoverGroups(email,q||"",page||1).then(r=>{setDiscoverGResults(r);setDiscoverGLoading(false);});
+  };
+  useEffect(()=>{if(showDiscoverG)discoverGSearch(discoverGQ,1);},[showDiscoverG]);
 
   const loadGroups=()=>{setLoadErr(false);if(email)SocialAPI.getGroups(email).then(r=>{if(r)setGroups(r);else setLoadErr(true);});};
   useEffect(loadGroups,[email]);
@@ -1974,6 +2044,50 @@ export function SocialGroups({s,d}){
           <div style={{display:"flex",gap:8}}><Btn v="secondary" onClick={()=>setShowCreate(false)}>Cancel</Btn><Btn full onClick={create}>Create</Btn></div>
         </Card>
       )}
+
+      {/* ── Discover Groups (global) ── */}
+      <Card style={{padding:14}}>
+        <button onClick={()=>setShowDiscoverG(!showDiscoverG)} style={{width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",background:"none",border:"none",cursor:"pointer",padding:0}}>
+          <span style={{fontSize:12,fontWeight:700,color:V.accent}}>🌍 Browse All Groups</span>
+          <span style={{fontSize:10,color:V.text3}}>{showDiscoverG?"▲":"▼"}</span>
+        </button>
+        {showDiscoverG&&<div style={{marginTop:10}}>
+          <div style={{display:"flex",gap:8,marginBottom:10}}>
+            <input value={discoverGQ} onChange={e=>setDiscoverGQ(e.target.value)}
+              onKeyDown={e=>{if(e.key==="Enter"){setDiscoverGPage(1);discoverGSearch(discoverGQ,1);}}}
+              placeholder="Search groups..."
+              style={{flex:1,padding:"8px 12px",background:"rgba(255,255,255,0.04)",border:`1px solid ${V.cardBorder}`,borderRadius:8,color:V.text,fontSize:12,outline:"none",fontFamily:V.font}}/>
+            <Btn v="secondary" onClick={()=>{setDiscoverGPage(1);discoverGSearch(discoverGQ,1);}}>Search</Btn>
+          </div>
+          {discoverGLoading&&<div style={{textAlign:"center",padding:12,fontSize:11,color:V.text3}}>Loading...</div>}
+          {!discoverGLoading&&discoverGResults&&(discoverGResults.groups||[]).length===0&&<div style={{textAlign:"center",padding:12,fontSize:11,color:V.text3}}>No groups found</div>}
+          {!discoverGLoading&&(discoverGResults?.groups||[]).map((g,i)=>(
+            <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 0",borderBottom:i<discoverGResults.groups.length-1?`1px solid rgba(255,255,255,0.03)`:"none"}}>
+              <div style={{width:32,height:32,borderRadius:8,background:`linear-gradient(135deg,${V.accent},${V.purple})`,
+                display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                <span style={{fontSize:14,fontWeight:800,color:"#fff"}}>👥</span>
+              </div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:12,fontWeight:600,color:V.text}}>{g.name}</div>
+                <div style={{fontSize:10,color:V.text3}}>{g.memberCount} member{g.memberCount!==1?"s":""}{g.description?` · ${g.description.slice(0,40)}${g.description.length>40?"...":""}`:""}</div>
+              </div>
+              {g.joined?<span style={{fontSize:9,color:V.success,fontWeight:600}}>Joined</span>
+              :<button onClick={async()=>{
+                const r=await SocialAPI.joinGroup(email,g.code);
+                if(r?.success){SuccessToastCtrl.show(`Joined ${g.name}`);discoverGSearch(discoverGQ,discoverGPage);loadGroups();}
+                else SuccessToastCtrl.show(r?.error||"Failed to join");
+              }} style={{padding:"4px 10px",borderRadius:6,background:V.accent,border:"none",cursor:"pointer",fontSize:10,fontWeight:700,color:V.bg,fontFamily:V.font}}>Join</button>}
+            </div>
+          ))}
+          {!discoverGLoading&&discoverGResults&&discoverGResults.total>discoverGResults.groups?.length&&(
+            <div style={{display:"flex",justifyContent:"center",gap:8,marginTop:8}}>
+              {discoverGPage>1&&<Btn v="secondary" onClick={()=>{const p=discoverGPage-1;setDiscoverGPage(p);discoverGSearch(discoverGQ,p);}}>← Prev</Btn>}
+              <Btn v="secondary" onClick={()=>{const p=discoverGPage+1;setDiscoverGPage(p);discoverGSearch(discoverGQ,p);}}>Next →</Btn>
+            </div>
+          )}
+        </div>}
+      </Card>
+
       {groups?.groups?.map(g=>(
         <Card key={g.code} style={{padding:14,cursor:"pointer"}} onClick={()=>openGroup(g.code)}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
@@ -2590,16 +2704,19 @@ export function SocialCompare({s}){
 export function SocialLeaderboard({s,d}){
   const { isDesktop } = useLayout();
   const email=s.profile?.email;
-  const [mode,setMode]=useState("group"); // group | friends
+  const [mode,setMode]=useState("group"); // group | friends | global
   const [metric,setMetric]=useState("streak"); // streak | volume | workouts | big3 | duels
   const [groups,setGroups]=useState(null);
   const [members,setMembers]=useState(null);
   const [selGroup,setSelGroup]=useState(null);
   const [friends,setFriends]=useState(null);
   const [loading,setLoading]=useState(false);
+  const [globalData,setGlobalData]=useState(null);
+  const [globalLoading,setGlobalLoading]=useState(false);
 
   useEffect(()=>{if(email)SocialAPI.getGroups(email).then(setGroups);},[email]);
   useEffect(()=>{if(email&&mode==="friends")SocialAPI.getFriends(email).then(r=>{if(r)setFriends(r);});},[email,mode]);
+  useEffect(()=>{if(email&&mode==="global"){setGlobalLoading(true);SocialAPI.globalLeaderboard(email,metric).then(r=>{setGlobalData(r);setGlobalLoading(false);});}},[email,mode,metric]);
 
   const loadMembers=(code)=>{
     setSelGroup(code);setLoading(true);
@@ -2731,7 +2848,7 @@ export function SocialLeaderboard({s,d}){
 
       {/* Mode toggle */}
       <div style={{display:"flex",gap:0,borderRadius:10,overflow:"hidden",border:`1px solid ${V.cardBorder}`}}>
-        {[{id:"group",label:"My Group"},{id:"friends",label:"Friends"}].map(m=>(
+        {[{id:"group",label:"My Group"},{id:"friends",label:"Friends"},{id:"global",label:"🌍 Global"}].map(m=>(
           <button key={m.id} onClick={()=>setMode(m.id)} style={{flex:1,padding:"9px 0",
             background:mode===m.id?V.accent:"transparent",border:"none",cursor:"pointer",
             fontSize:12,fontWeight:700,color:mode===m.id?V.bg:V.text3,fontFamily:V.font,transition:"all .2s"}}>
@@ -2889,6 +3006,96 @@ export function SocialLeaderboard({s,d}){
             <div style={{fontSize:13,fontWeight:600,color:V.text,marginBottom:4}}>Add friends to compete</div>
             <div style={{fontSize:11,color:V.text3,marginBottom:14}}>Your friends' stats will appear here once added</div>
             <Btn full onClick={()=>d({type:"TAB",tab:"social_friends"})}>Add Friends</Btn>
+          </Card>
+        )
+      )}
+
+      {/* GLOBAL MODE */}
+      {mode==="global"&&(
+        globalLoading?<SkeletonCard lines={4}/>:
+        globalData?.leaderboard?.length>0?(
+          <div style={{display:"flex",flexDirection:"column",gap:6}}>
+            {globalData.myRank&&(
+              <Card style={{padding:12,background:`linear-gradient(135deg,${V.accent}08,${V.purple}08)`}}>
+                <div style={{fontSize:10,fontWeight:700,color:V.text3,marginBottom:6}}>YOUR GLOBAL RANKING</div>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <div>
+                    <div style={{fontSize:24,fontWeight:900,color:V.accent,fontFamily:V.mono}}>
+                      #{globalData.myRank}
+                      <span style={{fontSize:12,color:V.text3,fontWeight:400}}> of {globalData.leaderboard.length}+</span>
+                    </div>
+                    <div style={{fontSize:10,color:V.text3}}>{curMetric.label}</div>
+                  </div>
+                  <div style={{textAlign:"right"}}>
+                    <div style={{fontSize:18,fontWeight:800,color:V.text,fontFamily:V.mono}}>{fmtVal(getMyMetricVal())}</div>
+                    <div style={{fontSize:9,color:V.text3}}>{curMetric.unit}</div>
+                  </div>
+                </div>
+              </Card>
+            )}
+            {/* Podium for top 3 */}
+            {globalData.leaderboard.length>=2&&(
+              <Card style={{padding:14,marginBottom:4}}>
+                <div style={{display:"flex",justifyContent:"center",alignItems:"flex-end",gap:8,height:90}}>
+                  {[1,0,2].filter(i=>i<globalData.leaderboard.length).map(i=>{
+                    const entry=globalData.leaderboard[i];
+                    const val=entry.value||0;
+                    const h=i===0?70:i===1?55:45;
+                    const name=entry.firstName||(entry.nickname?entry.nickname:(entry.username||"User"));
+                    return(
+                      <div key={i} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:4}}>
+                        <span style={{fontSize:i===0?22:16}}>{rankLabel(i)}</span>
+                        <div style={{fontSize:10,fontWeight:700,color:entry.isMe?V.accent:V.text,maxWidth:70,textAlign:"center",
+                          overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{name}{entry.isMe?" (You)":""}</div>
+                        <div style={{width:60,height:h,borderRadius:"6px 6px 0 0",
+                          background:rankColor(i),display:"flex",alignItems:"flex-start",justifyContent:"center",paddingTop:4}}>
+                          <span style={{fontSize:10,fontWeight:800,color:i<3?"#000":"#fff",fontFamily:V.mono}}>{fmtVal(val)}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </Card>
+            )}
+            {globalData.leaderboard.map((entry,i)=>{
+              const name=entry.firstName||(entry.nickname?entry.nickname:(entry.username||"User"));
+              const mv=Math.max(...globalData.leaderboard.map(e=>e.value||0),1);
+              return(
+                <Card key={i} style={{padding:10,
+                  border:entry.isMe?`1.5px solid ${V.accent}40`:undefined,
+                  background:entry.isMe?`${V.accent}06`:undefined}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    <div style={{width:26,height:26,borderRadius:8,background:rankColor(i),
+                      display:"flex",alignItems:"center",justifyContent:"center",
+                      fontSize:i<3?14:11,fontWeight:800,color:i<3?"#000":V.text3,flexShrink:0}}>
+                      {rankLabel(i)}
+                    </div>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3}}>
+                        <span style={{fontSize:12,fontWeight:entry.isMe?700:500,color:entry.isMe?V.accent:V.text,
+                          overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:"60%"}}>
+                          {name}{entry.isMe?" (You)":""}
+                        </span>
+                        <span style={{fontSize:13,fontWeight:800,color:entry.isMe?V.accent:V.text,fontFamily:V.mono}}>
+                          {fmtVal(entry.value||0)} <span style={{fontSize:9,color:V.text3,fontWeight:400}}>{curMetric.unit}</span>
+                        </span>
+                      </div>
+                      <div style={{height:3,borderRadius:2,background:"rgba(255,255,255,0.05)"}}>
+                        <div style={{height:"100%",borderRadius:2,
+                          background:entry.isMe?V.accent:i===0?"#fbbf24":V.purple,
+                          width:`${Math.round((entry.value||0)/mv*100)}%`,transition:"width .4s"}}/>
+                      </div>
+                    </div>
+                  </div>
+                </Card>
+              );
+            })}
+          </div>
+        ):(
+          <Card style={{padding:30,textAlign:"center"}}>
+            <div style={{fontSize:32,marginBottom:8}}>🌍</div>
+            <div style={{fontSize:13,fontWeight:600,color:V.text,marginBottom:4}}>No global rankings yet</div>
+            <div style={{fontSize:11,color:V.text3}}>Log workouts and sync to appear on the global leaderboard</div>
           </Card>
         )
       )}
