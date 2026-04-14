@@ -1027,7 +1027,7 @@ export function MessagesTab({s,d}){
   };
 
   return(
-    <div style={{display:"flex",flexDirection:"column",height:"calc(100vh - 120px)"}}>
+    <div style={{display:"flex",flexDirection:"column",flex:1,minHeight:0}}>
       {/* Header */}
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"4px 0 12px"}}>
         <button onClick={()=>d({type:"TAB",tab:"social"})} style={{background:"none",border:"none",display:"flex",alignItems:"center",gap:4,cursor:"pointer",padding:0}}>
@@ -1069,7 +1069,7 @@ export function MessagesTab({s,d}){
       )}
 
       {/* Conversation list */}
-      <div style={{flex:1,overflowY:"auto",WebkitOverflowScrolling:"touch"}}>
+      <div style={{flex:1,overflowY:"auto",WebkitOverflowScrolling:"touch",overscrollBehavior:"contain",minHeight:0}}>
         {loading&&[0,1,2,3].map(i=>(
           <div key={i} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 0",borderBottom:`1px solid ${V.cardBorder}`}}>
             <div style={{width:52,height:52,borderRadius:26,background:"rgba(255,255,255,0.06)",flexShrink:0}}/>
@@ -1166,11 +1166,12 @@ export function IMConversation({s,email,displayName,friend,onBack}){
     SocialAPI.getDMs(email,friend.email).then(r=>{
       if(r?.messages){
         const lastFriendRead=r.friendLastRead||null;
-        const msgs=(r.messages||[]).map(m=>({
-          ...m,imageData:m.data?.imageData||m.imageData||null,
-          text:(m.data?.imageData)?"📷 Photo":(m.text||""),
-          read:m.isOwn&&lastFriendRead&&new Date(m.ts)<=new Date(lastFriendRead)
-        }));
+        const msgs=(r.messages||[]).map(m=>{
+          const own=m.isOwn||(m.from||m.email)===email;
+          return{...m,from:m.from||m.email,isOwn:own,imageData:m.data?.imageData||m.imageData||null,
+          text:(m.data?.imageData)?"📷 Photo":(m.text||m.data?.text||""),
+          read:own&&lastFriendRead&&new Date(m.ts)<=new Date(lastFriendRead)};
+        });
         setMessages(msgs);LS.set(`ft-dm-${friend.email}`,msgs);
         // Seed lastMsgTsRef so the 8s poller doesn't fire on first tick
         lastMsgTsRef.current=msgs.slice(-1)[0]?.ts||null;
@@ -1205,10 +1206,12 @@ export function IMConversation({s,email,displayName,friend,onBack}){
     SocialAPI.getDMs(email,friend.email,oldestCursor).then(r=>{
       if(r?.messages){
         const lastFriendRead=r.friendLastRead||null;
-        const older=(r.messages||[]).map(m=>({...m,
-          imageData:m.data?.imageData||m.imageData||null,
-          text:(m.data?.imageData)?"📷 Photo":(m.text||""),
-          read:m.isOwn&&lastFriendRead&&new Date(m.ts)<=new Date(lastFriendRead)}));
+        const older=(r.messages||[]).map(m=>{
+          const own=m.isOwn||(m.from||m.email)===email;
+          return{...m,from:m.from||m.email,isOwn:own,imageData:m.data?.imageData||m.imageData||null,
+          text:(m.data?.imageData)?"📷 Photo":(m.text||m.data?.text||""),
+          read:own&&lastFriendRead&&new Date(m.ts)<=new Date(lastFriendRead)};
+        });
         setMessages(prev=>[...older,...prev]);
         setHasMore(!!r.hasMore);
         setOldestCursor(r.hasMore&&r.nextCursor?r.nextCursor:null);
@@ -1232,11 +1235,12 @@ export function IMConversation({s,email,displayName,friend,onBack}){
         SocialAPI.getDMs(email,friend.email).then(r=>{
           if(!r?.messages)return;
           const lastFriendRead=r.friendLastRead||null;
-          const incoming=(r.messages||[]).map(m=>({
-            ...m,imageData:m.data?.imageData||m.imageData||null,
-            text:(m.data?.imageData)?"📷 Photo":(m.text||""),
-            read:m.isOwn&&lastFriendRead&&new Date(m.ts)<=new Date(lastFriendRead)
-          }));
+          const incoming=(r.messages||[]).map(m=>{
+            const own=m.isOwn||(m.from||m.email)===email;
+            return{...m,from:m.from||m.email,isOwn:own,imageData:m.data?.imageData||m.imageData||null,
+            text:(m.data?.imageData)?"📷 Photo":(m.text||m.data?.text||""),
+            read:own&&lastFriendRead&&new Date(m.ts)<=new Date(lastFriendRead)};
+          });
           // Only update if newest message is newer than what we have
           const serverNewest=incoming.slice(-1)[0]?.ts;
           const localNewest=lastMsgTsRef.current;
@@ -1377,7 +1381,7 @@ export function IMConversation({s,email,displayName,friend,onBack}){
   ),[friend.avatar,friend.name]);
 
   return(
-    <div style={{display:"flex",flexDirection:"column",height:"calc(100vh - 100px)"}}>
+    <div style={{display:"flex",flexDirection:"column",flex:1,minHeight:0}}>
       {/* ── Header ── */}
       <div style={{display:"flex",alignItems:"center",gap:10,paddingBottom:10,borderBottom:`1px solid ${V.cardBorder}`,flexShrink:0}}>
         <button onClick={onBack} style={{background:"none",border:"none",display:"flex",alignItems:"center",gap:2,cursor:"pointer",padding:"4px 0",flexShrink:0}}>
@@ -1416,7 +1420,7 @@ export function IMConversation({s,email,displayName,friend,onBack}){
 
       {/* ── Message list ── */}
       <div ref={listRef} style={{flex:1,overflowY:"auto",WebkitOverflowScrolling:"touch",display:"flex",flexDirection:"column",
-        padding:"8px 0",gap:0}}>
+        padding:"8px 0",gap:0,overscrollBehavior:"contain",minHeight:0}}>
 
         {/* Load older */}
         {hasMore&&(
