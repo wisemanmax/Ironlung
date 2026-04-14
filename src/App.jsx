@@ -1055,7 +1055,7 @@ function App(){
         {/* Social tab + sub-pages */}
         {s.tab==="social"&&<SocialTab s={s} d={d} unreadMsgCount={unreadMsgCount}/>}
         {s.tab==="social_feed"&&<div><SubBack to="social" label="Social"/><SocialFeed s={s} d={d}/></div>}
-        {s.tab==="social_messages"&&<div><MessagesTab s={s} d={d}/></div>}
+        {s.tab==="social_messages"&&<div style={{display:"flex",flexDirection:"column",minHeight:"100%"}}><MessagesTab s={s} d={d}/></div>}
         {s.tab==="social_friends"&&<div><SubBack to="social" label="Social"/><SocialFriends s={s} d={d}/></div>}
         {s.tab==="social_groups"&&<div><SubBack to="social" label="Social"/><SocialGroups s={s} d={d}/></div>}
         {s.tab==="social_challenges"&&<div><SubBack to="social" label="Social"/><SocialChallenges s={s} d={d}/></div>}
