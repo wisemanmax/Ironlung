@@ -1,5 +1,5 @@
 import { LS } from '../utils/storage';
-import { today, ago } from '../utils/helpers';
+import { today, ago, calcStreak } from '../utils/helpers';
 
 export const BADGE_DEFS=[
   {id:"streak_7",icon:"🔥",name:"On Fire",desc:"7-day workout streak",cat:"Consistency"},
@@ -35,7 +35,7 @@ export const BADGE_DEFS=[
 ];
 // Check which badges are earned given current state
 export function calcEarnedBadges(s){
-  const streak=(()=>{let c=0;const d2=new Date();if(!s.workouts.some(w=>w.date===today()))d2.setDate(d2.getDate()-1);for(let i=0;i<365;i++){const ds=new Date(d2);ds.setDate(d2.getDate()-i);const dstr=ds.toISOString().split("T")[0];if(s.workouts.some(w=>w.date===dstr))c++;else break;}return c;})();
+  const streak=calcStreak(s.workouts);
   // B12 fix: use most recent body entry (index 0, sorted desc) not oldest (last)
   const bw=parseFloat(s.profile?.currentWeight||s.body?.[0]?.weight)||180;
   const getBest=(id)=>{let b=0;(s.workouts||[]).forEach(w=>w.exercises.forEach(e=>{if(e.exerciseId===id)e.sets.forEach(st=>{const wt=parseFloat(st.weight)||0;if(wt>b)b=wt;});}));return b;};

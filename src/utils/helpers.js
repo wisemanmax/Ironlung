@@ -4,6 +4,13 @@ export const today = () => new Date().toISOString().split("T")[0];
 export const fmtShort = (d) => new Date(d+"T12:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric"});
 export const fmtFull = (d) => new Date(d+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"});
 export const ago = (n) => { const d=new Date(); d.setDate(d.getDate()-n); return d.toISOString().split("T")[0]; };
+// Shared streak calculation — counts consecutive days with workouts ending at today (or yesterday if no workout today)
+export const calcStreak = (workouts) => {
+  const w=workouts||[];const t=today();let c=0;const d=new Date();
+  if(!w.some(x=>x.date===t))d.setDate(d.getDate()-1);
+  for(let i=0;i<365;i++){const dt=new Date(d);dt.setDate(dt.getDate()-i);const ds=dt.toISOString().split("T")[0];
+    if(w.some(x=>x.date===ds))c++;else break;}return c;
+};
 // Safely display a friend's name — never shows raw email
 export const friendDisplayName=(f)=>{
   const n=f?.name||"";

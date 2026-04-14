@@ -5,7 +5,7 @@ import { LS } from '../utils/storage';
 import { Icons } from './Icons';
 import { Card, Btn, Field, Sheet, Chip, Progress } from './ui';
 import { FOODS, FOOD_CATS } from '../data/foods';
-import { PLATES, calcPlates, fmtTimer, today, ago, toKg, toLbs, wUnit, convW, calc1RM, fmtShort } from '../utils/helpers';
+import { PLATES, calcPlates, fmtTimer, today, ago, toKg, toLbs, wUnit, convW, calc1RM, fmtShort, calcStreak } from '../utils/helpers';
 import { SuccessToastCtrl } from './ui';
 import { checkAndAwardMissions } from '../tabs/gamification';
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, ReferenceLine } from 'recharts';
@@ -408,13 +408,7 @@ export function PlateCalc(){
 
 // ─── Hooks ───
 export function useStreak(workouts){
-  return useMemo(()=>{
-    let streak=0;const d=new Date();
-    if(!workouts.find(w=>w.date===today()))d.setDate(d.getDate()-1);
-    while(true){const ds=d.toISOString().split("T")[0];
-      if(workouts.find(w=>w.date===ds)){streak++;d.setDate(d.getDate()-1);}else break;}
-    return streak;
-  },[workouts]);
+  return useMemo(()=>calcStreak(workouts),[workouts]);
 }
 export function usePRs(workouts,exercises){
   return useMemo(()=>{

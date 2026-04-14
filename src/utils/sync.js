@@ -147,7 +147,7 @@ export const SocialAPI={
   getFriends:async(email)=>{
     // #B5: email removed from GET query string — server reads identity from session token.
     // Sending email in the URL logged it to Vercel/CDN/proxy access logs unnecessarily.
-    try{const r=await fetch(`${SYNC_URL}/api/social?route=friends`,{headers:SocialAPI._headers(email)});return r.ok?await r.json():null;}catch(e){return null;}
+    try{const r=await fetch(`${SYNC_URL}/api/social?route=friends`,{headers:SocialAPI._headers(email)});if(!r.ok){console.warn('getFriends failed:',r.status);return null;}return await r.json();}catch(e){console.warn('getFriends error:',e.message);return null;}
   },
   sendRequest:async(email,target)=>{
     try{const r=await fetch(`${SYNC_URL}/api/social?route=friends`,{method:"POST",headers:SocialAPI._headers(email),body:JSON.stringify({route:"friends",email,action:"send",target})});return r.ok?await r.json():null;}catch(e){return null;}
@@ -161,7 +161,7 @@ export const SocialAPI={
 
   // Feed
   getFeed:async(email,limit)=>{
-    try{const r=await fetch(`${SYNC_URL}/api/social?route=feed&limit=${limit||30}`,{headers:SocialAPI._headers(email)});return r.ok?await r.json():null;}catch(e){return null;}
+    try{const r=await fetch(`${SYNC_URL}/api/social?route=feed&limit=${limit||30}`,{headers:SocialAPI._headers(email)});if(!r.ok){console.warn('getFeed failed:',r.status);return null;}return await r.json();}catch(e){console.warn('getFeed error:',e.message);return null;}
   },
   logEvent:async(email,type,data,visibility)=>{
     try{const r=await fetch(`${SYNC_URL}/api/social?route=feed`,{method:"POST",headers:SocialAPI._headers(email),body:JSON.stringify({route:"feed",email,action:"log_event",type,data,visibility:visibility||"friends"})});return r.ok?await r.json():null;}catch(e){return null;}
@@ -172,7 +172,7 @@ export const SocialAPI={
 
   // Groups
   getGroups:async(email)=>{
-    try{const r=await fetch(`${SYNC_URL}/api/social?route=groups`,{headers:SocialAPI._headers(email)});return r.ok?await r.json():null;}catch(e){return null;}
+    try{const r=await fetch(`${SYNC_URL}/api/social?route=groups`,{headers:SocialAPI._headers(email)});if(!r.ok){console.warn('getGroups failed:',r.status);return null;}return await r.json();}catch(e){console.warn('getGroups error:',e.message);return null;}
   },
   createGroup:async(email,name,desc)=>{
     try{const r=await fetch(`${SYNC_URL}/api/social?route=groups`,{method:"POST",headers:SocialAPI._headers(email),body:JSON.stringify({route:"groups",email,action:"create",name,description:desc})});return r.ok?await r.json():null;}catch(e){return null;}
@@ -255,13 +255,13 @@ export const SocialAPI={
 
   // Global discovery
   discoverUsers:async(email,q,page)=>{
-    try{const params=new URLSearchParams({route:"discover_users"});if(q)params.set("q",q);if(page)params.set("page",String(page));const r=await fetch(`${SYNC_URL}/api/social?${params}`,{headers:SocialAPI._headers(email)});return r.ok?await r.json():null;}catch(e){return null;}
+    try{const params=new URLSearchParams({route:"discover_users"});if(q)params.set("q",q);if(page)params.set("page",String(page));const r=await fetch(`${SYNC_URL}/api/social?${params}`,{headers:SocialAPI._headers(email)});if(!r.ok){console.warn('discoverUsers failed:',r.status);return null;}return await r.json();}catch(e){console.warn('discoverUsers error:',e.message);return null;}
   },
   discoverGroups:async(email,q,page)=>{
-    try{const params=new URLSearchParams({route:"discover_groups"});if(q)params.set("q",q);if(page)params.set("page",String(page));const r=await fetch(`${SYNC_URL}/api/social?${params}`,{headers:SocialAPI._headers(email)});return r.ok?await r.json():null;}catch(e){return null;}
+    try{const params=new URLSearchParams({route:"discover_groups"});if(q)params.set("q",q);if(page)params.set("page",String(page));const r=await fetch(`${SYNC_URL}/api/social?${params}`,{headers:SocialAPI._headers(email)});if(!r.ok){console.warn('discoverGroups failed:',r.status);return null;}return await r.json();}catch(e){console.warn('discoverGroups error:',e.message);return null;}
   },
   globalLeaderboard:async(email,metric)=>{
-    try{const r=await fetch(`${SYNC_URL}/api/social?route=global_leaderboard&metric=${encodeURIComponent(metric||"streak")}`,{headers:SocialAPI._headers(email)});return r.ok?await r.json():null;}catch(e){return null;}
+    try{const r=await fetch(`${SYNC_URL}/api/social?route=global_leaderboard&metric=${encodeURIComponent(metric||"streak")}`,{headers:SocialAPI._headers(email)});if(!r.ok){console.warn('globalLeaderboard failed:',r.status);return null;}return await r.json();}catch(e){console.warn('globalLeaderboard error:',e.message);return null;}
   },
 };
 export const CloudSync={
@@ -336,11 +336,17 @@ export const CloudSync={
         if(big3>=1000)badges2.push("1000lb Club");if(state.workouts.length>=100)badges2.push("Century Club");
         if(protDays2>=7)badges2.push("Macro Master");
       }
+      const weekWorkouts=state.workouts.filter(w=>w.date>=ago(7)).length;
+      const weekVol=Math.round(state.workouts.filter(w=>w.date>=ago(7)).reduce((a,w)=>a+w.exercises.reduce((b2,e)=>b2+e.sets.reduce((c,st)=>c+(parseFloat(st.weight)||0)*(parseInt(st.reps)||0),0),0),0));
+      const duelWins=(LS.get("ft-duel-record")||{}).wins||0;
       SocialAPI.snapshotChallenges(email,[
         {id:"streak",value:streak2,tier:tierCalc(streak2,[[7,"bronze"],[14,"silver"],[21,"gold"],[30,"diamond"]])},
         {id:"big3",value:big3,tier:tierCalc(big3,[[600,"bronze"],[800,"silver"],[1000,"gold"],[1200,"diamond"]]),metadata:{bench:getBest("bench"),squat:getBest("squat"),deadlift:getBest("deadlift")}},
         {id:"macro",value:protDays2,tier:tierCalc(protDays2,[[3,"bronze"],[5,"silver"],[7,"gold"]])},
         {id:"ironscore",value:LS.get("ft-ironscore")||0,tier:(()=>{const xp2=LS.get("ft-ironscore")||0;return([...IRON_RANKS].reverse().find(r=>xp2>=r.xpNeeded)||IRON_RANKS[0]).name;})()},
+        {id:"weekWorkouts",value:weekWorkouts},
+        {id:"weekVol",value:weekVol},
+        {id:"duel_wins",value:duelWins},
       ],badges2).catch(()=>{});
       // Flush queued items
       SyncQueue.processAll();

@@ -4,13 +4,13 @@ import { V, Haptic } from '../utils/theme';
 import { LS } from '../utils/storage';
 import { Icons } from '../components/Icons';
 import { Card, Btn, Field, Sheet, Chip, Stat, Progress, Skeleton, SkeletonCard, MsgBannerCtrl, SuccessToastCtrl, ConfirmCtrl } from '../components/ui';
-import { today, ago, fmtShort, fmtFull, uid, friendDisplayName, convW, wUnit, calc1RM } from '../utils/helpers';
+import { today, ago, fmtShort, fmtFull, uid, friendDisplayName, convW, wUnit, calc1RM, calcStreak } from '../utils/helpers';
 import { SocialAPI, SYNC_URL } from '../utils/sync';
 import { ShareCard } from '../utils/share';
 import { BADGE_DEFS, calcEarnedBadges } from '../data/badges';
 import { useLayout } from '../utils/responsive';
 import { IRON_RANKS } from '../data/ranks';
-import { HelpBtn } from './features';
+import { HelpBtn, compressImage } from './features';
 import { IronScoreCard, RankBadge, DailyMissionsCard } from './gamification';
 import { useStreak, calcReadiness } from '../components/dialogs';
 import { SectionGrid } from './hubs';
@@ -20,7 +20,7 @@ export function SocialTab({s,d,unreadMsgCount=0}){
   // Quick stats for display
   const email=s.profile?.email;
   const streak=useStreak(s.workouts);
-  const weekW=s.workouts.filter(w=>w.date>=ago(7)).length;
+  const weekW=(s.workouts||[]).filter(w=>w.date>=ago(7)).length;
   const [notifCount,setNotifCount]=useState(0);
   useEffect(()=>{if(email)SocialAPI.getNotifications(email).then(r=>{if(r)setNotifCount(r.unread||0);});},[email]);
 
@@ -43,7 +43,7 @@ export function SocialTab({s,d,unreadMsgCount=0}){
       {/* Quick stats bar */}
       <div style={{display:"flex",gap:8}}>
         {[{l:"Streak",v:`${streak}d`,c:streak>=7?V.accent:V.text3},{l:"This Week",v:`${weekW}`,c:weekW>=3?V.accent:V.text3},
-          {l:"Workouts",v:`${s.workouts.length}`,c:V.purple}].map(st=>(
+          {l:"Workouts",v:`${(s.workouts||[]).length}`,c:V.purple}].map(st=>(
           <div key={st.l} style={{flex:1,padding:"8px",borderRadius:8,background:"rgba(255,255,255,0.02)",
             border:`1px solid ${V.cardBorder}`,textAlign:"center"}}>
             <div style={{fontSize:16,fontWeight:800,color:st.c,fontFamily:V.mono}}>{st.v}</div>
@@ -126,11 +126,11 @@ export function SocialFeed({s,d}){
   };
 
   const streak=useStreak(s.workouts);
-  const weekW=s.workouts.filter(w=>w.date>=ago(7)).length;
-  const protDays=s.nutrition.filter(n=>n.date>=ago(7)&&(n.protein||0)>=(s.goals?.protein||180)).length;
+  const weekW=(s.workouts||[]).filter(w=>w.date>=ago(7)).length;
+  const protDays=(s.nutrition||[]).filter(n=>n.date>=ago(7)&&(n.protein||0)>=(s.goals?.protein||180)).length;
   const readiness=calcReadiness(s);
   const {xp,rank}=useMemo(()=>calcIronScore(s),[s.workouts,s.nutrition,s.photos,s.checkins,s.body]);
-  const todayN=s.nutrition.filter(n=>n.date===today());
+  const todayN=(s.nutrition||[]).filter(n=>n.date===today());
   const todayCal=todayN.reduce((a,n)=>a+(n.cal||0),0);
   const todayProt=todayN.reduce((a,n)=>a+(n.protein||0),0);
   const nextWorkout=(()=>{const sched=s.schedule?.weekly||{};const dow=new Date().getDay();for(let i=0;i<7;i++){const d2=(dow+i)%7;const label=s.schedule?.overrides?.[ago(-i)]||sched[d2];if(label&&label!=="Rest"&&label!=="Off")return{day:i===0?"Today":i===1?"Tomorrow":["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][(dow+i)%7],label};}return null;})();
@@ -184,7 +184,7 @@ export function SocialFeed({s,d}){
         ))}
       </Card>
       {/* Accountability */}
-      {!s.workouts.some(w=>w.date===today())&&!s.workouts.some(w=>w.date===ago(1))&&(
+      {!(s.workouts||[]).some(w=>w.date===today())&&!(s.workouts||[]).some(w=>w.date===ago(1))&&(
         <Card style={{padding:14,border:`1px solid ${V.warn}20`}}>
           <div style={{fontSize:12,fontWeight:700,color:V.warn}}>💬 Get After It</div>
           <div style={{fontSize:11,color:V.text3,marginTop:4}}>2 days without a workout. Even 1 set counts.</div>
@@ -198,7 +198,7 @@ export function SocialFeed({s,d}){
         const activeWar=(()=>{
           const dow=new Date().getDay();const mondayOffset=dow===0?6:dow-1;
           const weekStart=ago(mondayOffset);
-          const weekW2=s.workouts.filter(w=>w.date>=weekStart).length;
+          const weekW2=(s.workouts||[]).filter(w=>w.date>=weekStart).length;
           return weekW2;
         })();
         if(rivals.length===0&&duels.length===0)return null;
@@ -335,7 +335,7 @@ export function SocialFriends({s,d}){
   };
   useEffect(()=>{if(showDiscover)discoverSearch(discoverQ,1);},[showDiscover]);
   const streak=useStreak(s.workouts);
-  const getBest=(id)=>{let b=0;s.workouts.forEach(w=>w.exercises.forEach(e=>{if(e.exerciseId===id)e.sets.forEach(st=>{if(st.weight>b)b=st.weight;});}));return b;};
+  const getBest=(id)=>{let b=0;(s.workouts||[]).forEach(w=>w.exercises.forEach(e=>{if(e.exerciseId===id)e.sets.forEach(st=>{if(st.weight>b)b=st.weight;});}));return b;};
   const myBig3=getBest("bench")+getBest("squat")+getBest("deadlift");
 
   const loadFriends=()=>{setLoadErr(false);setLoading(true);if(email)SocialAPI.getFriends(email).then(d2=>{if(d2)setFriendsData(d2);else setLoadErr(true);setLoading(false);});};
@@ -486,7 +486,7 @@ export function SocialFriends({s,d}){
       <div style={{display:"grid",gridTemplateColumns:"1fr auto 1fr",gap:8,alignItems:"center"}}>
         {[{l:"Streak",my:streak,their:compareWith.challenges?.find(c=>c.challenge_id==="streak")?.value||"?"},
           {l:"Big 3",my:myBig3||"—",their:compareWith.challenges?.find(c=>c.challenge_id==="big3")?.value||"?"},
-          {l:"Workouts",my:s.workouts.length,their:"?"}].map((r,i)=>(
+          {l:"Workouts",my:(s.workouts||[]).length,their:"?"}].map((r,i)=>(
           <React.Fragment key={i}>
             <div style={{textAlign:"center",padding:10,borderRadius:10,background:parseFloat(r.my)>=parseFloat(r.their)?V.accent+"08":"rgba(255,255,255,0.02)"}}>
               <div style={{fontSize:20,fontWeight:800,color:parseFloat(r.my)>=parseFloat(r.their)?V.accent:V.text,fontFamily:V.mono}}>{r.my}</div>
@@ -824,7 +824,7 @@ export function SocialFriends({s,d}){
           {discoverLoading&&<div style={{textAlign:"center",padding:12,fontSize:11,color:V.text3}}>Loading...</div>}
           {!discoverLoading&&discoverResults&&(discoverResults.users||[]).length===0&&<div style={{textAlign:"center",padding:12,fontSize:11,color:V.text3}}>No users found</div>}
           {!discoverLoading&&(discoverResults?.users||[]).map((u,i)=>(
-            <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 0",borderBottom:i<discoverResults.users.length-1?`1px solid rgba(255,255,255,0.03)`:"none"}}>
+            <div key={u.friendCode||u.username||i} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 0",borderBottom:i<discoverResults.users.length-1?`1px solid rgba(255,255,255,0.03)`:"none"}}>
               <div style={{width:32,height:32,borderRadius:8,background:`linear-gradient(135deg,${V.purple},#ec4899)`,
                 display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,overflow:"hidden"}}>
                 {u.avatar?<img src={u.avatar} style={{width:"100%",height:"100%",objectFit:"cover"}} alt=""/>
@@ -1744,6 +1744,14 @@ export function SocialGroups({s,d}){
         setChatMessages(msgs);LS.set(`ft-gchat-${gc}`,msgs);
       }
     });
+    // Fetch group activity feed
+    SocialAPI.getGroupEvents(email,gc).then(r=>{
+      if(r?.events){
+        const feed=r.events.filter(e=>e.type!=="GroupChat"&&e.type!=="GroupChallengeCreated").map(e=>({
+          id:e.id,name:e.name,email:e.email,type:e.type,data:e.data,created_at:e.created_at,isOwn:e.email===email}));
+        setGroupFeed(feed);
+      }
+    });
     // Fetch group challenges from API
     SocialAPI.getGroupEvents(email,gc,"GroupChallengeCreated").then(r=>{
       if(r?.events?.length>0){
@@ -1883,9 +1891,9 @@ export function SocialGroups({s,d}){
         )}
         {groupChals.length>0?groupChals.map((ch,i)=>{
           const myVal=ch.metric==="streak"?streak:
-            ch.metric==="workouts"?s.workouts.filter(w=>w.date>=ch.created).length:
-            ch.metric==="volume"?s.workouts.filter(w=>w.date>=ch.created).reduce((a2,w)=>a2+w.exercises.reduce((b2,e)=>b2+e.sets.reduce((c2,st)=>c2+(parseFloat(st.weight)||0)*(parseInt(st.reps)||0),0),0),0):
-            ch.metric==="protein"?s.nutrition.filter(n=>n.date>=ch.created).reduce((a2,n)=>a2+(n.protein||0),0):0;
+            ch.metric==="workouts"?(s.workouts||[]).filter(w=>w.date>=ch.created).length:
+            ch.metric==="volume"?(s.workouts||[]).filter(w=>w.date>=ch.created).reduce((a2,w)=>a2+w.exercises.reduce((b2,e)=>b2+e.sets.reduce((c2,st)=>c2+(parseFloat(st.weight)||0)*(parseInt(st.reps)||0),0),0),0):
+            ch.metric==="protein"?(s.nutrition||[]).filter(n=>n.date>=ch.created).reduce((a2,n)=>a2+(n.protein||0),0):0;
           const pct=Math.min(100,Math.round(myVal/ch.target*100));
           return(
             <Card key={i} style={{padding:14}}>
@@ -2062,7 +2070,7 @@ export function SocialGroups({s,d}){
           {discoverGLoading&&<div style={{textAlign:"center",padding:12,fontSize:11,color:V.text3}}>Loading...</div>}
           {!discoverGLoading&&discoverGResults&&(discoverGResults.groups||[]).length===0&&<div style={{textAlign:"center",padding:12,fontSize:11,color:V.text3}}>No groups found</div>}
           {!discoverGLoading&&(discoverGResults?.groups||[]).map((g,i)=>(
-            <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 0",borderBottom:i<discoverGResults.groups.length-1?`1px solid rgba(255,255,255,0.03)`:"none"}}>
+            <div key={g.code} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 0",borderBottom:i<discoverGResults.groups.length-1?`1px solid rgba(255,255,255,0.03)`:"none"}}>
               <div style={{width:32,height:32,borderRadius:8,background:`linear-gradient(135deg,${V.accent},${V.purple})`,
                 display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
                 <span style={{fontSize:14,fontWeight:800,color:"#fff"}}>👥</span>
@@ -2117,7 +2125,7 @@ export function SocialProfile({s,d}){
   const [newUn,setNewUn]=useState(username);
   const [unError,setUnError]=useState("");
   const streak=useStreak(s.workouts);
-  const getBestLift=(id)=>{let b=0;s.workouts.forEach(w=>w.exercises.forEach(e=>{if(e.exerciseId===id)e.sets.forEach(st=>{if(st.weight>b)b=st.weight;});}));return b;};
+  const getBestLift=(id)=>{let b=0;(s.workouts||[]).forEach(w=>w.exercises.forEach(e=>{if(e.exerciseId===id)e.sets.forEach(st=>{if(st.weight>b)b=st.weight;});}));return b;};
   const big3=getBestLift("bench")+getBestLift("squat")+getBestLift("deadlift");
   const [privacy,setPrivacy]=useState(LS.get("ft-privacy")||{workouts:false,macros:false,photos:false,body:false});
   const toggleP=(k)=>{const n={...privacy,[k]:!privacy[k]};setPrivacy(n);LS.set("ft-privacy",n);};
@@ -2269,7 +2277,7 @@ export function SocialProfile({s,d}){
         )}
         {unError&&<div style={{fontSize:10,color:V.danger,marginTop:4}}>{unError}</div>}
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,margin:"12px 0"}}>
-          {[{l:"STREAK",v:streak,c:V.accent},{l:"WORKOUTS",v:s.workouts.length,c:V.purple},{l:"BIG 3",v:big3||"—",c:V.warn}].map(st=>(
+          {[{l:"STREAK",v:streak,c:V.accent},{l:"WORKOUTS",v:(s.workouts||[]).length,c:V.purple},{l:"BIG 3",v:big3||"—",c:V.warn}].map(st=>(
             <div key={st.l} style={{padding:6,borderRadius:6,background:"rgba(255,255,255,0.02)"}}>
               <div style={{fontSize:16,fontWeight:800,color:st.c,fontFamily:V.mono}}>{st.v}</div>
               <div style={{fontSize:8,color:V.text3}}>{st.l}</div>
@@ -2622,19 +2630,19 @@ export function SocialCompare({s}){
   const { isDesktop } = useLayout();
   const getBest=(id)=>{let b=0;(s.workouts||[]).forEach(w=>w.exercises.forEach(e=>{if(e.exerciseId===id)e.sets.forEach(st=>{const wt=parseFloat(st.weight)||0;if(wt>b)b=wt;});}));return b;};
   const e1rmBest=(id)=>{let b=0;(s.workouts||[]).forEach(w=>w.exercises.forEach(e=>{if(e.exerciseId===id)e.sets.forEach(st=>{const e1rm=calc1RM(parseFloat(st.weight)||0,parseInt(st.reps)||0);if(e1rm>b)b=e1rm;});}));return b;};
-  const weekW=s.workouts.filter(w=>w.date>=ago(7)).length;
-  const bestWeek=Math.max(...Array.from({length:12},(_,i)=>s.workouts.filter(w=>{const d2=ago(i*7);const d3=ago((i+1)*7);return w.date<=d2&&w.date>d3;}).length),weekW);
+  const weekW=(s.workouts||[]).filter(w=>w.date>=ago(7)).length;
+  const bestWeek=Math.max(...Array.from({length:12},(_,i)=>(s.workouts||[]).filter(w=>{const d2=ago(i*7);const d3=ago((i+1)*7);return w.date<=d2&&w.date>d3;}).length),weekW);
   const streak=useStreak(s.workouts);
-  const bestStreak=(()=>{let best=0,c=0;for(let i=0;i<365;i++){if(s.workouts.some(w=>w.date===ago(i))){c++;if(c>best)best=c;}else c=0;}return best;})();
-  const thisMonthW=s.workouts.filter(w=>w.date>=ago(30)).length;
-  const bestMonth=Math.max(...Array.from({length:6},(_,i)=>s.workouts.filter(w=>w.date>=ago((i+1)*30)&&w.date<ago(i*30)).length),thisMonthW);
-  const totalVol=Math.round(s.workouts.filter(w=>w.date>=ago(7)).reduce((a,w)=>a+w.exercises.reduce((b,e)=>b+e.sets.reduce((c,st)=>c+(parseFloat(st.weight)||0)*(parseInt(st.reps)||0),0),0),0));
-  const bestWeekVol=Math.max(...Array.from({length:8},(_,i)=>Math.round(s.workouts.filter(w=>w.date>=ago((i+1)*7)&&w.date<ago(i*7)).reduce((a,w)=>a+w.exercises.reduce((b,e)=>b+e.sets.reduce((c,st)=>c+(parseFloat(st.weight)||0)*(parseInt(st.reps)||0),0),0),0))),totalVol);
+  const bestStreak=(()=>{let best=0,c=0;for(let i=0;i<365;i++){if((s.workouts||[]).some(w=>w.date===ago(i))){c++;if(c>best)best=c;}else c=0;}return best;})();
+  const thisMonthW=(s.workouts||[]).filter(w=>w.date>=ago(30)).length;
+  const bestMonth=Math.max(...Array.from({length:6},(_,i)=>(s.workouts||[]).filter(w=>w.date>=ago((i+1)*30)&&w.date<ago(i*30)).length),thisMonthW);
+  const totalVol=Math.round((s.workouts||[]).filter(w=>w.date>=ago(7)).reduce((a,w)=>a+w.exercises.reduce((b,e)=>b+e.sets.reduce((c,st)=>c+(parseFloat(st.weight)||0)*(parseInt(st.reps)||0),0),0),0));
+  const bestWeekVol=Math.max(...Array.from({length:8},(_,i)=>Math.round((s.workouts||[]).filter(w=>w.date>=ago((i+1)*7)&&w.date<ago(i*7)).reduce((a,w)=>a+w.exercises.reduce((b,e)=>b+e.sets.reduce((c,st)=>c+(parseFloat(st.weight)||0)*(parseInt(st.reps)||0),0),0),0))),totalVol);
   const bench=getBest("bench"),squat=getBest("squat"),dead=getBest("deadlift");
   const benchE1=e1rmBest("bench"),squatE1=e1rmBest("squat"),deadE1=e1rmBest("deadlift");
-  const bestBench=Math.max(...s.workouts.map(w=>w.exercises.filter(e=>e.exerciseId==="bench").reduce((b,e)=>Math.max(b,...e.sets.map(st=>parseFloat(st.weight)||0)),0)),bench);
-  const bestSquat=Math.max(...s.workouts.map(w=>w.exercises.filter(e=>e.exerciseId==="squat").reduce((b,e)=>Math.max(b,...e.sets.map(st=>parseFloat(st.weight)||0)),0)),squat);
-  const bestDead=Math.max(...s.workouts.map(w=>w.exercises.filter(e=>e.exerciseId==="deadlift").reduce((b,e)=>Math.max(b,...e.sets.map(st=>parseFloat(st.weight)||0)),0)),dead);
+  const bestBench=Math.max(...(s.workouts||[]).map(w=>w.exercises.filter(e=>e.exerciseId==="bench").reduce((b,e)=>Math.max(b,...e.sets.map(st=>parseFloat(st.weight)||0)),0)),bench);
+  const bestSquat=Math.max(...(s.workouts||[]).map(w=>w.exercises.filter(e=>e.exerciseId==="squat").reduce((b,e)=>Math.max(b,...e.sets.map(st=>parseFloat(st.weight)||0)),0)),squat);
+  const bestDead=Math.max(...(s.workouts||[]).map(w=>w.exercises.filter(e=>e.exerciseId==="deadlift").reduce((b,e)=>Math.max(b,...e.sets.map(st=>parseFloat(st.weight)||0)),0)),dead);
 
   const pct=(cur,best)=>best>0?Math.min(100,Math.round(cur/best*100)):100;
 
@@ -2726,8 +2734,8 @@ export function SocialLeaderboard({s,d}){
   const streak=useStreak(s.workouts);
   const getBest=(id)=>{let b=0;(s.workouts||[]).forEach(w=>w.exercises.forEach(e=>{if(e.exerciseId===id)e.sets.forEach(st=>{const wt=parseFloat(st.weight)||0;if(wt>b)b=wt;});}));return b;};
   const myBig3=getBest("bench")+getBest("squat")+getBest("deadlift");
-  const myWeekVol=Math.round(s.workouts.filter(w=>w.date>=ago(7)).reduce((a,w)=>a+w.exercises.reduce((b2,e)=>b2+e.sets.reduce((c,st)=>c+(parseFloat(st.weight)||0)*(parseInt(st.reps)||0),0),0),0));
-  const myWeekWorkouts=s.workouts.filter(w=>w.date>=ago(7)).length;
+  const myWeekVol=Math.round((s.workouts||[]).filter(w=>w.date>=ago(7)).reduce((a,w)=>a+w.exercises.reduce((b2,e)=>b2+e.sets.reduce((c,st)=>c+(parseFloat(st.weight)||0)*(parseInt(st.reps)||0),0),0),0));
+  const myWeekWorkouts=(s.workouts||[]).filter(w=>w.date>=ago(7)).length;
   const myDuelRecord=LS.get("ft-duel-record")||{wins:0,losses:0,ties:0};
   const myDuelWins=myDuelRecord.wins||0;
 
@@ -2746,8 +2754,8 @@ export function SocialLeaderboard({s,d}){
   const getMemberVal=(m)=>{
     if(metric==="streak")return parseInt(m.challenges?.find(c=>c.challenge_id==="streak")?.value)||0;
     if(metric==="big3")return parseInt(m.challenges?.find(c=>c.challenge_id==="big3")?.value)||0;
-    if(metric==="volume")return parseInt(m.challenges?.find(c=>c.challenge_id==="ironscore")?.value)||0;
-    if(metric==="workouts")return parseInt(m.challenges?.find(c=>c.challenge_id==="streak")?.value)||0;
+    if(metric==="volume")return parseInt(m.challenges?.find(c=>c.challenge_id==="weekVol")?.value)||0;
+    if(metric==="workouts")return parseInt(m.challenges?.find(c=>c.challenge_id==="weekWorkouts")?.value)||0;
     if(metric==="duels")return parseInt(m.challenges?.find(c=>c.challenge_id==="duel_wins")?.value)||0;
     return 0;
   };
@@ -2760,10 +2768,11 @@ export function SocialLeaderboard({s,d}){
     (friends?.friends||[]).forEach(f=>{
       const fStreak=parseInt(f.challenges?.find?.(c=>c.challenge_id==="streak")?.value)||0;
       const fBig3=parseInt(f.challenges?.find?.(c=>c.challenge_id==="big3")?.value)||0;
-      const fXP=parseInt(f.challenges?.find?.(c=>c.challenge_id==="ironscore")?.value)||0;
+      const fWeekVol=parseInt(f.challenges?.find?.(c=>c.challenge_id==="weekVol")?.value)||0;
+      const fWeekWorkouts=parseInt(f.challenges?.find?.(c=>c.challenge_id==="weekWorkouts")?.value)||0;
       const fDuelWins=parseInt(f.challenges?.find?.(c=>c.challenge_id==="duel_wins")?.value)||0;
       rows.push({...f,name:friendDisplayName(f),isMe:false,
-        streak:fStreak,big3:fBig3,weekVol:fXP,weekWorkouts:fStreak,duelWins:fDuelWins});
+        streak:fStreak,big3:fBig3,weekVol:fWeekVol,weekWorkouts:fWeekWorkouts,duelWins:fDuelWins});
     });
     return rows.sort((a,b)=>{
       if(metric==="streak")return b.streak-a.streak;
@@ -3107,19 +3116,19 @@ export function SocialLeaderboard({s,d}){
 export function SocialChallenges({s,d}){
   const { isDesktop } = useLayout();
   const streak=useStreak(s.workouts);
-  const getBest=(id)=>{let b=0;s.workouts.forEach(w=>w.exercises.forEach(e=>{if(e.exerciseId===id)e.sets.forEach(st=>{if(st.weight>b)b=st.weight;});}));return b;};
+  const getBest=(id)=>{let b=0;(s.workouts||[]).forEach(w=>w.exercises.forEach(e=>{if(e.exerciseId===id)e.sets.forEach(st=>{if(st.weight>b)b=st.weight;});}));return b;};
   const big3=getBest("bench")+getBest("squat")+getBest("deadlift");
-  const protDays=s.nutrition.filter(n=>n.date>=ago(7)&&(n.protein||0)>=(s.goals?.protein||180)).length;
+  const protDays=(s.nutrition||[]).filter(n=>n.date>=ago(7)&&(n.protein||0)>=(s.goals?.protein||180)).length;
   const tierOf=(val,tiers)=>{for(let i=tiers.length-1;i>=0;i--)if(val>=tiers[i].v)return tiers[i];return{name:"",icon:"",v:0};};
   const streakTiers=[{v:7,name:"Bronze",icon:"🥉"},{v:14,name:"Silver",icon:"🥈"},{v:21,name:"Gold",icon:"🥇"},{v:30,name:"Diamond",icon:"💎"}];
   const liftTiers=[{v:600,name:"Bronze",icon:"🥉"},{v:800,name:"Silver",icon:"🥈"},{v:1000,name:"Gold",icon:"🥇"},{v:1200,name:"Diamond",icon:"💎"}];
   const macroTiers=[{v:3,name:"Bronze",icon:"🥉"},{v:5,name:"Silver",icon:"🥈"},{v:7,name:"Gold",icon:"🥇"}];
   const weekNum=Math.floor((Date.now()-new Date("2026-01-01").getTime())/(7*86400000));
   const weeklyChallenges=[
-    {name:"3 in 5",desc:"3 workouts in 5 days",check:()=>s.workouts.filter(w=>w.date>=ago(5)).length,total:3},
+    {name:"3 in 5",desc:"3 workouts in 5 days",check:()=>(s.workouts||[]).filter(w=>w.date>=ago(5)).length,total:3},
     {name:"Protein Week",desc:"Hit protein target 4 days",check:()=>protDays,total:4},
-    {name:"Volume King",desc:"5,000 lbs total squat volume this week",check:()=>{let v=0;s.workouts.filter(w=>w.date>=ago(7)).forEach(w=>w.exercises.forEach(e=>{if(e.exerciseId==="squat")e.sets.forEach(st=>{v+=(parseFloat(st.weight)||0)*(parseInt(st.reps)||0);});}));return Math.round(v);},total:5000},
-    {name:"Full Logger",desc:"Log workout + meal + check-in today",check:()=>(s.workouts.some(w=>w.date===today())?1:0)+(s.nutrition.some(n=>n.date===today())?1:0)+((s.checkins||[]).some(c=>c.date===today())?1:0),total:3},
+    {name:"Volume King",desc:"5,000 lbs total squat volume this week",check:()=>{let v=0;(s.workouts||[]).filter(w=>w.date>=ago(7)).forEach(w=>w.exercises.forEach(e=>{if(e.exerciseId==="squat")e.sets.forEach(st=>{v+=(parseFloat(st.weight)||0)*(parseInt(st.reps)||0);});}));return Math.round(v);},total:5000},
+    {name:"Full Logger",desc:"Log workout + meal + check-in today",check:()=>((s.workouts||[]).some(w=>w.date===today())?1:0)+((s.nutrition||[]).some(n=>n.date===today())?1:0)+((s.checkins||[]).some(c=>c.date===today())?1:0),total:3},
   ];
   const weeklyChallenge=weeklyChallenges[weekNum%weeklyChallenges.length];
 
@@ -3258,8 +3267,7 @@ export function getActiveMultiplier(s){
 // ── Core calcIronScore (base XP from history + bonus pool) ──
 export function calcIronScore(s){
   let baseXP=0;
-  // B19 fix: mirror useStreak logic — if no workout today, start counting from yesterday
-  const streak=(()=>{let c=0;const d=new Date();if(!(s.workouts||[]).some(w=>w.date===today()))d.setDate(d.getDate()-1);for(let i=0;i<365;i++){const ds=new Date(d);ds.setDate(d.getDate()-i);const dstr=ds.toISOString().split("T")[0];if((s.workouts||[]).some(w=>w.date===dstr))c++;else break;}return c;})();
+  const streak=calcStreak(s.workouts);
   baseXP += (s.workouts||[]).length * 30;
   baseXP += streak * 8;
   const getBest=(id)=>{let b=0;(s.workouts||[]).forEach(w=>w.exercises.forEach(e=>{if(e.exerciseId===id)e.sets.forEach(st=>{const w2=parseFloat(st.weight)||0;if(w2>b)b=w2;});}));return b;};
@@ -3277,7 +3285,7 @@ export function calcIronScore(s){
   // Strength milestones
   if(big3>=500)baseXP+=200;if(big3>=800)baseXP+=400;if(big3>=1000)baseXP+=600;if(big3>=1200)baseXP+=1000;if(big3>=1500)baseXP+=2000;
   // Consistency bonuses
-  const monthWorkouts=s.workouts.filter(w=>w.date>=ago(30)).length;
+  const monthWorkouts=(s.workouts||[]).filter(w=>w.date>=ago(30)).length;
   if(monthWorkouts>=16)baseXP+=500;if(monthWorkouts>=20)baseXP+=1000;
   // Add bonus pool (missions, multipliers, events)
   const bonusXP=getXPBonus().total||0;

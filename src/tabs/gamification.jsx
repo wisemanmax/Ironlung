@@ -11,7 +11,7 @@ import { IRON_RANKS, WAR_EPOCH } from '../data/ranks';
 import { useLayout } from '../utils/responsive';
 import { BADGE_DEFS, calcEarnedBadges } from '../data/badges';
 import { ShareCard } from '../utils/share';
-import { getActiveMultiplier, calcIronScore, getShields, useLevelUp, checkStreakShieldAward, checkStreakShieldActivation, LevelUpCelebration, getXPBonus } from './social';
+import { getActiveMultiplier, calcIronScore, getShields, useLevelUp, checkStreakShieldAward, checkStreakShieldActivation, LevelUpCelebration, getXPBonus, addXPBonus } from './social';
 import { useStreak } from '../components/dialogs';
 import { HelpBtn } from './features';
 
@@ -193,10 +193,6 @@ export function checkMilestones(s, newWorkout, newPRs) {
   });
 
   // Streak milestones
-  const streak = (s.workouts||[]).filter(w => {
-    // rough streak from saved workouts including today
-    return true;
-  }).length; // simplified — use workout count as proxy
   const streakMilestones = [7,14,30,60,100];
   const actualStreak = (()=>{let c=0,i=0;while((s.workouts||[]).some(w=>w.date===ago(i))||i===0){if((s.workouts||[]).some(w=>w.date===ago(i))||newWorkout?.date===ago(0))c++;else break;i++;}return c;})();
   streakMilestones.forEach(n => {
@@ -412,7 +408,7 @@ export function DailyMissionsCard({s,d,compact}){
       setCelebrated(true);LS.set("ft-mission-celebrated",today());
       setTimeout(()=>SuccessToastCtrl.show("🌟 All 3 missions complete! +30 bonus XP"),300);
     }
-  },[allDone]);
+  },[allDone,celebrated]);
   const completed=LS.get("ft-missions-completed")||{};
   const allBonusCollected=completed[today()]?.__all_bonus;
   const refreshAt=new Date();
